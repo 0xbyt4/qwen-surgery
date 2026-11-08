@@ -328,6 +328,106 @@ to -1.58 for the top 16 x1.5).
   edit moved one set by +6). The claim rests on the three sets together and
   on the sums of four numbers.
 
+## 11. The edited model on disk (`export_edit.py`)
+
+- `models/Qwen3-0.6B-mathheads15`: heads 12 to 15 of block 20 scaled by 1.5,
+  saved as one safetensors file with the config and tokenizer (git-ignored,
+  1.19 GB). `EDIT.json` in the folder records the edit.
+- It loads with `mlx_lm.load`. Its logits equal those of the in-memory edit
+  (max difference 0.0), and it gives the same hard-set result (seed 3: 99/120,
+  same counts per kind).
+
+## 12. Where the answer digit forms (`circuit.py`, `runs/lens_add2.log`, `runs/patch_add2.log`)
+
+Data: 200 two-digit additions with a three-digit sum, direct prompt, the
+answer after "The answer is ".
+
+Logit lens (the residual after each block through the final norm and head;
+share of examples with the right digit on top):
+
+| After block | tens | units |
+|---|---|---|
+| 0 to 20 | 0.00 to 0.01 | 0.00 to 0.07 |
+| 21 | 0.10 | 0.58 |
+| 22 | 0.27 | 0.69 |
+| 23 | 0.43 | 0.93 |
+| 24 | 0.84 | 0.97 |
+| 25 | 0.96 | 1.00 |
+
+Patching: pairs that differ only in the units digit of B (so the units digit
+of the sum differs). One part output, at the position that writes one digit,
+is copied from the source run into the base run; 1 means the answer digit
+moves fully to the source.
+
+| Part | units | tens |
+|---|---|---|
+| block 20 attention | 0.86 | 0.26 |
+| block 20 MLP | 0.53 | 0.18 |
+| block 21 MLP | 0.80 | 0.20 |
+| block 22 MLP | 0.23 | 0.03 |
+| blocks 23 to 25 MLP | 0.01 to 0.30 | 0.16 to 0.26 |
+| all parts of blocks 0 to 19 | 0.00 to 0.13 | 0.00 to 0.03 |
+
+- At the answer position, nothing before block 20 carries the operand digit:
+  block 20 attention brings it in (section 9), and the MLPs of blocks 20 and
+  21 carry it on.
+- The units digit is ready after block 23; the tens digit, which needs the
+  carry, after block 24. The carry is spread over the MLPs of blocks 20 to 25.
+
+## 13. Digit neurons: Fourier waves in block 21, one-hot digits in block 22 (`tuning.py`, `runs/tuning2*.json`)
+
+For each MLP neuron at the position that writes the units digit (1000
+additions), eta squared gives the share of its variance explained by a label.
+
+| Block | neurons with eta^2 > 0.3 for: sum units | A units | B units | carry |
+|---|---|---|---|---|
+| 20 | 0 | 15 | 267 | 3 |
+| 21 | 5 | 289 | 768 | 5 |
+| 22 | 446 | 19 | 61 | 5 |
+| 23 | 1193 | 0 | 9 | 16 |
+
+- Blocks 20 and 21 hold the operands, block 22 and 23 hold the sum digit. The
+  sum is formed between them.
+- Block 21: the top neurons for the sum digit are pure waves over the digit
+  0 to 9. In each, one frequency holds 97 to 99% of the variance of the class
+  means, and all five frequencies of a period-10 signal occur: period 10
+  (neurons 1496, 2435), 5 (2040), 3.3 (2331), 2.5 (1002) and 2 (569, 2591,
+  1073; these fire on even sums). This is a Fourier code of the sum mod 10.
+- Block 22: one neuron for each digit. Neuron 613 fires for 1, 816 for 2
+  (negative), 779 for 3, 721 for 4, 452 for 5, 1787 for 6, 1441 for 7, 1092
+  for 8, 612 for 9 (negative), 1187 for 0 (negative), with activations of 30
+  to 50 for its digit and near 0 for the others. Their spectra are flat, as
+  expected for a one-hot code. Block 22 turns the waves into digits.
+- Causal test, units-digit accuracy on 500 new additions (base 1.000):
+
+| Zeroed | block 21 | block 22 | block 23 | block 20 |
+|---|---|---|---|---|
+| top 4 for the sum digit | 0.906 | 0.994 | 1.000 | 1.000 |
+| top 16 | 0.346 | 1.000 | 1.000 | 1.000 |
+| top 64 | 0.216 | 1.000 | 1.000 | 0.998 |
+| random 4, 16 or 64 | 1.000 | 1.000 | 1.000 | 1.000 |
+
+- The 16 block 21 wave neurons on all tests (`runs/fourier21.json`, seed 3):
+
+| Zeroed | hard set | sums of four | 5-digit subtraction | math20 logprob | held-out logprob | story loss |
+|---|---|---|---|---|---|---|
+| none | 90/120 | 11/20 | 18/20 | -1.89 | -3.11 | 2.4606 |
+| block 21 top 16 | 19/120 | 0/20 | 0/20 | -3.74 | -6.46 | 2.4609 |
+| block 21 random 16 | 91/120 | 11/20 | 18/20 | -1.90 | -3.11 | 2.4615 |
+
+- 16 of the 86,016 MLP neurons of the model (0.02%) carry most of its
+  arithmetic, and plain stories do not need them (+0.0003 loss).
+- The one-hot neurons of block 22 can be zeroed without loss: the digit is
+  also carried by other neurons. The wave neurons of block 21 are a narrow
+  point of the circuit.
+- Related work (checked on arXiv): Zhou et al. 2024, arXiv 2406.03445 (LLMs
+  add with Fourier features; in their models attention does the
+  high-frequency, modular part); Kantamneni and Tegmark 2025, arXiv
+  2502.00873 (numbers as a helix, the "Clock" algorithm); Nikankin et al.
+  2024, arXiv 2410.21272 (arithmetic from a sparse set of heuristic
+  neurons). Our results fit these; here the high-frequency waves sit in a
+  block 21 MLP, after the attention of block 20 has fetched the digits.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -363,6 +463,14 @@ Items marked "estimate" or "idea" are not measured.
   of block 20 did not help, although it raised the answer logprob on the
   easy set: a better logprob on easy questions does not mean better answers
   on hard ones.
+- The addition circuit, as far as measured: block 20 attention fetches the
+  operand digits (heads 12 to 15 and 8); the MLPs of blocks 20 and 21 hold
+  the operand digits; block 21 MLP neurons code the sum digit as waves of
+  periods 10, 5, 3.3, 2.5 and 2; block 22 and 23 MLP neurons code it one-hot;
+  the digit is the top token after block 23 (sections 9, 12, 13).
+- 16 wave neurons of block 21 are a narrow point: without them the hard set
+  falls from 90 to 19 of 120, and the story loss does not change (section
+  13).
 - Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
   operand digit by place value for the digit being written (section 9).
 - bf16 is a noise source for the measurements: batch and serial runs give
