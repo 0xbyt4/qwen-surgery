@@ -36,7 +36,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--models", nargs="+", required=True)
     p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--batch", type=int, default=150)
+    p.add_argument("--batch", type=int, default=60)
     p.add_argument("--max-tokens", type=int, default=1024)
     p.add_argument("--name", default="gsm8k")
     a = p.parse_args()
@@ -65,8 +65,8 @@ def main() -> None:
             f"cut {cut}  tokens {tokens:.1f}",
             flush=True,
         )
-    out = ROOT / "runs" / f"{a.name}.json"
-    out.write_text(json.dumps({"config": vars(a), "results": results}, indent=2))
+        out = ROOT / "runs" / f"{a.name}.json"
+        out.write_text(json.dumps({"config": vars(a), "results": results}, indent=2))
 
 
 if __name__ == "__main__":
