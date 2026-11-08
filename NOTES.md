@@ -183,6 +183,81 @@ Values: correct answers out of 20 (mean logprob of the right answer; base
 - The first-order estimate ranks well but is too small: for the top 16 it
   predicts a summed change of -18.9, and the measured change is -50.2.
 
+## 5. Attention heads (`sweep_parts.py --part heads`, `runs/sweep_heads.json`, `runs/text_heads20.json`)
+
+One head off at a time in blocks 20, 17, 11 and 9 (serial runs; values are
+correct answers / mean logprob, base 20 / -1.87):
+
+- Block 20: no single head breaks the math. The largest effects are heads 15
+  (16 / -3.24), 12 (15 / -3.19), 8 (17 / -2.96), 7 (16 / -2.38), 13 and 14
+  (-2.32, -2.29). The other heads change the logprob by 0.07 or less.
+- Block 17: head 12 (16 / -3.09) and head 11 (-2.59); others small.
+- Blocks 11 and 9: no head below -2.46.
+
+Groups of heads in block 20 (`textcheck.py`, no generation; story loss base
+2.4606, math20 logprob -1.865, held-out -3.118):
+
+| Heads off | Story loss | math20 | held-out |
+|---|---|---|---|
+| 12, 15 | 2.4623 | -3.88 | -5.76 |
+| 12, 13, 14, 15 | 2.4619 | -5.68 | -9.03 |
+| 7, 8, 12, 15 | 2.4800 | -4.90 | -8.33 |
+| 7, 8, 12, 13, 14, 15 | 2.4813 | -7.09 | -10.36 |
+| the other 9 heads | 2.4950 | -1.98 | -2.59 |
+| all 16 (attention off) | 2.5210 | -8.12 | -10.37 |
+
+- Heads 12 to 15 of block 20 (4 of 16) are a math part that general text does
+  not need: the story loss changes by 0.001, and the held-out logprob falls
+  from -3.12 to -9.03. Heads 12 and 13 share key-value head 6, heads 14 and 15
+  share key-value head 7.
+- Six heads (7, 8, 12 to 15) give the full effect of the attention on the
+  held-out set (-10.36 against -10.37).
+- The other 9 heads matter for general text (+0.034) and not for math; without
+  them, the held-out logprob even gets better (-3.12 to -2.59).
+
+## 6. MLP neurons of blocks 21 and 22 (`runs/neurons21.json`, `runs/neurons22.json`)
+
+Same method as section 4 (serial runs):
+
+| Zeroed neurons | Block 21 held-out | Block 21 held-out logprob | Block 22 held-out | Block 22 held-out logprob |
+|---|---|---|---|---|
+| none | 37/40 | -3.11 | 37/40 | -3.11 |
+| top 16 | 32 | -4.04 | 32 | -3.89 |
+| top 64 | 24 | -5.51 | 28 | -4.49 |
+| top 256 | 24 | -6.20 | 32 | -5.02 |
+| bottom 16 | 27 | -3.79 | 36 | -3.18 |
+| bottom 64 | 23 | -4.66 | 36 | -2.99 |
+| bottom 256 | 20 | -5.63 | 35 | -2.96 |
+| random 16 / 64 (seed 0) | 36 / 39 | -3.11 / -3.11 | 37 / 37 | -3.13 / -3.14 |
+
+- The math effect is less concentrated than in block 20 (top 16: held-out
+  -4.04 and -3.89, against -4.94 in block 20).
+- Block 21: the "bottom" neurons, which the gradient says the answers do
+  better without, make the answers much worse when zeroed (held-out 37 to 23
+  for 64 neurons; the math20 logprob also falls, from -1.87 to -2.67, against
+  a predicted gain). The first-order estimate has the wrong sign here. A
+  neuron set chosen by gradient must always be checked by a real zeroing.
+
+## 7. Batch evaluation (`evalmath.run(..., batch=True)`, now the default)
+
+- All questions are generated in one `batch_generate` call, and the answer
+  logprobs come from one forward pass with right padding. The output head of
+  the logprob runs in float32: the bf16 logits are rounded to steps of 0.125
+  near 16 to 32.
+- Speed (M5 Pro on battery, 3 rounds, order alternated, wall time including
+  the logprob pass): math20 6.0 to 6.3 s serial against 1.01 to 1.02 s batch
+  (about 6 times faster); held-out 40 questions 10.7 to 11.0 s against 1.34 s
+  (about 8 times). Peak memory 1.86 GB serial, 2.46 and 3.56 GB batch.
+- The batch run is not bit-identical to the serial run: bf16 sums run in a
+  different order, so a greedy reply can take another path at a near tie. On
+  the base model, 13 of 20 math20 replies have the same text and 19 of 20 the
+  same answer (19/20 against 20/20 correct); held-out 37/40 in both.
+- Mean logprob: serial -1.865, batch -1.887, float32 model -1.884 (math20);
+  -3.118, -3.112, -3.102 (held-out). The mean is stable to about 0.02. Single
+  questions can differ by up to 0.4 between bf16 runs, so compare means.
+- Results before this section come from serial runs; compare runs only within
+  one mode.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -207,8 +282,14 @@ Items marked "estimate" or "idea" are not measured.
   language: block 8 keeps 20/20 but raises the story loss from 2.461 to 2.566.
   Each surgery needs the text check (`textcheck.py`).
 - Thinking mode used 14.5 times more tokens and was not better on this test.
-- The first-order (gradient) estimate of a zeroing effect ranks neurons well,
-  but its size is about 2.5 times too small for 16 neurons.
+- The first-order (gradient) estimate of a zeroing effect ranks the top
+  neurons well, but its size is about 2.5 times too small for 16 neurons, and
+  for the "bottom" neurons of block 21 it has the wrong sign (section 6).
+- Math in block 20 attention sits in a few heads: heads 12 to 15 (key-value
+  heads 6 and 7) are needed for math and not for stories (section 5).
+- bf16 is a noise source for the measurements: batch and serial runs give
+  different greedy replies at near ties, and single-question logprobs differ
+  by up to 0.4 (section 7).
 
 ### Speed and MLX
 
@@ -219,10 +300,9 @@ Items marked "estimate" or "idea" are not measured.
   also the output head), so 190 tok/s is about 226 GB/s of weight reads.
   Generation of one stream is therefore limited by memory bandwidth (estimate
   from the numbers above; the chip limit was not checked).
-- Idea, the largest speed-up for this work: the tests generate the 20 (or 40)
-  questions one after another. With a batch, each weight read serves many
-  questions, so a sweep could run several times faster. mlx-lm has a batch
-  generator (`BatchGenerator` in `mlx_lm/generate.py`); not yet tried.
+- Batch evaluation (section 7) made the tests 6 to 8 times faster: one
+  weight read per step now serves all questions. A sweep of 57 runs drops
+  from about 6 minutes to about 1 minute (estimate from the per-run times).
 - Parallel processes work (each needs about 1.3 GB), but they slow each
   other. Speed numbers must come from runs alone, with alternating order: in
   the first sweep the base run (first in the process) showed 190 tok/s and
