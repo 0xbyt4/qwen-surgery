@@ -6,6 +6,9 @@ nothing from that head or neuron to the residual stream. The other parts of
 the forward pass (and the KV cache) do not change.
 """
 
+import json
+from pathlib import Path
+
 import mlx.core as mx
 from mlx import nn
 
@@ -47,3 +50,28 @@ class Surgeon:
         for (layer, name), w in self.saved.items():
             self._linear(layer, name).weight = w
         self.saved.clear()
+
+
+def apply_spec(s: Surgeon, spec: str) -> None:
+    """Apply one edit written as text:
+
+    attn:L, mlp:L, block:L, head:L:H, neurons:L:j1,j2,...
+    nfile:PATH:KEY  (the neurons of results[KEY] in a neurons.py output file)
+    """
+    kind, *rest = spec.split(":")
+    if kind == "attn":
+        s.zero_attention(int(rest[0]))
+    elif kind == "mlp":
+        s.zero_mlp(int(rest[0]))
+    elif kind == "block":
+        s.zero_attention(int(rest[0]))
+        s.zero_mlp(int(rest[0]))
+    elif kind == "head":
+        s.zero_heads(int(rest[0]), [int(rest[1])])
+    elif kind == "neurons":
+        s.zero_neurons(int(rest[0]), [int(x) for x in rest[1].split(",")])
+    elif kind == "nfile":
+        d = json.loads(Path(rest[0]).read_text())
+        s.zero_neurons(d["config"]["layer"], d["results"][rest[1]]["neurons"])
+    else:
+        raise ValueError(f"unknown edit: {spec}")
