@@ -982,6 +982,38 @@ Read from the saved files and checked; the runs did not finish.
 - Steering vectors (`runs/agent_steerbake/screen.log`): only a first
   screen of how often replies start with "To"; no accuracy yet.
 
+## 25. ExPO: weights from the instruct-base difference (agent run, provisional; `runs/agent_expo/`)
+
+New weights theta = theta_I + alpha * (theta_I - theta_B), with theta_B from
+Qwen3-0.6B-Base (downloaded with approval, `models/Qwen3-0.6B-Base`; same
+keys and shapes, relative difference about 13-14% per matrix). The instruct
+config, tokenizer and stop token are kept. "Timber": before extrapolating,
+the small singular values of each delta matrix are shrunk (lam 0.5).
+
+- Screen (dev): teacher-forced products, answer logprob and story loss move
+  monotonically with alpha. Toward the base model (alpha -0.3): products
+  0.649 to 0.709, story loss 2.446 to 2.352. Amplifying (alpha +0.2):
+  products 0.612, story loss 2.671. The chat replies still stop.
+- Hard set seed 8, plain prompt, 600 questions (seed 9 was used to choose
+  the variants; seed 8 is new):
+
+| Variant | right | gained / lost | p | word2 | sub_big | mean tokens |
+|---|---|---|---|---|---|---|
+| base | 535 | - | - | 51 | 95 | 157 |
+| alpha +0.2 | 541 | 25 / 19 | 0.45 | 67 | 92 | 142 |
+| Timber lam 0.5, alpha +0.2 | 552 | 32 / 15 | 0.019 | 72 | 94 | 144 |
+| alpha -0.3 | 522 | 18 / 31 | 0.085 | 54 | 79 | 185 |
+| base + "To" x1.25 | 535 | 7 / 7 | 1.0 | 49 | 95 | 152 |
+
+- The gain of Timber +0.2 is almost all in word2 (51 to 72; well-posed 43
+  to 58 of 76). It is the first edit with computed (not scaled) weights
+  that passes a paired test on new questions, but three variants were
+  tested on seed 8 and word2 is a flawed template (section 18). GSM8K is
+  the deciding test (running).
+- alpha < 0 helps the teacher-forced products but hurts generation
+  (sub_big 95 to 79, longer replies). The "To" row adds nothing with the
+  plain prompt, as in section 23.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
