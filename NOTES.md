@@ -908,6 +908,27 @@ was put into the model as an output-head bias that is +b at id 1249 only.
   "To" (223 predicted, 213 measured on mul2x2), so a factor can be chosen
   from one forward pass, without a generation sweep (not yet used).
 
+## 22. GSM8K: no gain from the row edits (`gsm8k.py`, `runs/gsm8k.json`)
+
+GSM8K test set (1319 questions, all with whole-number answers), "direct"
+prompt (with "Answer with only the final number."), greedy, thinking off,
+1024 tokens, batches of 24. Paired sign test against the base model:
+
+| Model | right of 1319 | gained / lost | p | replies starting "To" | mean tokens | cut |
+|---|---|---|---|---|---|---|
+| base | 707 (53.6%) | - | - | 47 | 160.8 | 4 |
+| three rows | 695 (52.7%) | 103 / 115 | 0.46 | 664 | 164.0 | 8 |
+| "To" x1.25 | 682 (51.7%) | 90 / 115 | 0.09 | 664 | 162.0 | 5 |
+
+- The edit changes the style (47 to 664 "To" starts) but not the length or
+  the accuracy: on word problems the base model already works in steps
+  (161 tokens on average) in spite of the "only the number" request. The
+  "To" gain of sections 17-19 appears only where the base model answers in
+  one shot (bare sums and products). It is not a general math gain.
+- Two batches hit a GPU out-of-memory error during the run (other jobs on
+  the machine) and were run again after a pause.
+- Open: the same comparison with the "plain" prompt (no instruction).
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
