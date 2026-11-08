@@ -557,6 +557,56 @@ Per digit, teacher forced, 1000 products (seed 3): thousands 0.971, hundreds
   forced 0.672 to 0.597 (x1.5), 0.648 (x1.25), 0.653 (heads 8, 12-15 x1.25);
   in generation 332 to 288 of 500 (x1.5).
 
+## 16. The product circuit (`mulpatch.py`, `runs/mulpatch_*.json`)
+
+Patching on 200 pairs A * B and A * B' (B' differs in its units digit).
+Both runs get the base product as the forced answer, so the inputs differ
+only in B. (A first version forced each run's own product; then the input
+token at the scored position differed too, and block 0 attention scored
+0.36. That version was dropped.)
+
+Blocks (0 to 19 all score between -0.04 and 0.01):
+
+| Block | attn @hundreds | attn @tens | MLP @hundreds | MLP @tens |
+|---|---|---|---|---|
+| 20 | 0.27 | 0.61 | 0.16 | 0.23 |
+| 21 | 0.00 | -0.01 | 0.05 | 0.32 |
+| 22 | -0.01 | 0.21 | 0.07 | 0.34 |
+| 23 | 0.04 | 0.18 | 0.12 | 0.46 |
+| 24 | 0.01 | 0.00 | 0.16 | 0.59 |
+| 25 | 0.38 | 0.12 | 0.39 | 0.56 |
+| 26 | 0.24 | 0.17 | 0.39 | 0.33 |
+| 27 | 0.15 | 0.25 | 0.38 | 0.21 |
+
+- As for sums, the operands enter through block 20 attention. The tens
+  digit then forms over the MLPs of blocks 21 to 25, and the hundreds digit
+  late, in blocks 25 to 27.
+- Single heads (block 20 heads score at most 0.10 each; the effect is spread
+  over heads 6, 8 and 12 to 15): block 22 head 14 (tens 0.28), block 25 head
+  15 (hundreds 0.27) and block 26 head 6 (hundreds 0.19, tens 0.21).
+- What they look at (attention on 60 products):
+  - Block 20 heads 6 and 12 to 15 look at the units digits of A and B in the
+    reply, also when the hundreds digit is written; only head 8 looks at the
+    tens digits there (B tens 0.30, A tens 0.17). The hundreds digit needs
+    A tens x B tens.
+  - Block 22 head 14 looks at the current token (the digit just written,
+    0.89 to 0.94).
+  - Block 25 head 15 and block 26 head 6 look one position back (0.36 to
+    0.70) and at the first token, an attention sink: they copy what was
+    computed at the previous answer position.
+- Scaling these heads only hurts (dev, all four digits, base 0.649): block
+  22 head 14 x0.5/1.25/1.5/2 0.621/0.633/0.584/0.426; block 25 head 15
+  0.567/0.570/0.507/0.423; block 26 head 6 0.593/0.642/0.621/0.559. The model
+  sits at a good point for these scales.
+- Look-ahead: a probe (as in section 15) reads a later digit at an earlier
+  answer position. At the position that writes the thousands digit, the
+  hundreds digit is readable 0.54 (block 25) to 0.59 (block 27); the tens
+  digit at the hundreds position 0.50. The operands alone give 0.25 and
+  0.14. The model computes part of the next digit one step early, and the
+  previous-position heads carry it forward. The units digit is readable
+  0.69 to 0.79 at earlier positions already after block 20: it is computed
+  early, as for sums.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -612,6 +662,10 @@ Items marked "estimate" or "idea" are not measured.
   with enough questions where the base model is not near 0 or 100%.
 - The two-digit product errors are confident carry errors, and no single
   scale of a block, an MLP or the digit code fixes them (section 15).
+- Products use the same entry point as sums (block 20 attention) but need
+  more blocks after it: the tens digit forms over MLPs 21 to 25, the
+  hundreds digit in 25 to 27. Late heads copy work from the previous answer
+  position, and part of the next digit is ready one step early (section 16).
 - Steering needs a larger push than the class mean: at alpha 1 block 25
   moves 34 to 44% of answers, at alpha 4 it moves 96 to 100% (section 14).
 - Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
