@@ -680,6 +680,9 @@ them: -1.887 and -3.112 in all three "none"/"To" rows.)
   to boil an egg, ...), 19 replies are the same token for token. The one
   that changed ("How can I convert Celsius to Fahrenheit?") now starts with
   "To convert" and gives 9/5, where the base reply said 9.5.
+  Correction (section 19): this check used the math prompt, which adds
+  "Answer with only the final number." to each question, so the replies
+  were short. In a plain chat turn, 23 of 30 replies stay the same.
 - Cost: the replies are longer. Hard set, seed 3: 87.4 new tokens per
   question on average, 122.0 with "To" x1.25 (+40%).
 - Speed: no change. 3 alternating runs of 256 tokens: base 251.9 to 254.2
@@ -742,9 +745,77 @@ into D bags "with any extra kept aside"; the answer is the whole part of
 - General prompts (25, now with "the opposite of up", "how do I calm down",
   "should I write my ideas down", "when the stock market goes down"): 24
   replies are the same token for token with both rows; the one that changed
-  is the Celsius reply of section 17.
+  is the Celsius reply of section 17. Correction (section 19): this check
+  used the math prompt; in a plain chat turn " down" x1.1 keeps 27 of 30
+  replies.
 - Saved as `models/Qwen3-0.6B-to125-down110` (both rows; git-ignored). From
   disk: word2 seed 6 207 of 227 well-posed, 242 of 300, as in memory.
+
+## 19. A dropped subtraction, the row of " -", and a better reply check (`mixedcheck.py`, `replycheck.py`, `runs/mixedcheck_s12.json`, `runs/reply_chat*.json`, `runs/tradeoff_minus_s3.json`, `runs/text_minus.json`)
+
+Hard set, seed 8, 600 questions (100 per kind), 768 tokens:
+
+| Model | all | mul3x2 | add4 | word2 | linear2 | mixed | sub_big |
+|---|---|---|---|---|---|---|---|
+| base | 443 | 39 | 60 | 58 | 100 | 97 | 89 |
+| "To" x1.25 + " down" x1.1 | 538 | 85 | 93 | 69 | 100 | 96 | 95 |
+| + " -" x1.1 | 541 | 85 | 93 | 70 | 100 | 99 | 94 |
+
+(word2 counts the ill-posed questions of section 18 as wrong.)
+
+- A regression of the "To" edit: on A * B + C - D * A (`mixedcheck.mixed`,
+  300 per seed) the base model is right 287 times (seed 11), "To" x1.25
+  268 times. " down" x1.1 alone: 287. 24 of the new errors give P + C:
+  the model drops the subtraction (base: 4).
+- Why: base replies start with "We" and work in steps. "To" replies
+  compute the two products and then write "P + C - Q = " in one line (88 of
+  300). There they write P + C first. Then the next token decides: " -"
+  continues ("= 254 - 95 = 159", right), "\n" stops ("= 1175", wrong). In
+  the wrong replies "\n" leads " -" by 0.31 logits (median of 26); in the
+  right ones " -" leads by 2.6 (median of 58).
+- Edit: the output row of " -" (id 481), on top of the two rows. Seed 11
+  (dev): x1.05 287, x1.1 290, x1.2 292.
+- Seed 12 (new, `mixedcheck.py`, three sets of 300):
+
+| Edit | mixed | dropped | three | sub_big |
+|---|---|---|---|---|
+| none | 293 | 0 | 294 | 278 |
+| "To" x1.25 + " down" x1.1 | 266 | 24 | 297 | 284 |
+| + " -" x1.1 | 288 | 2 | 297 | 283 |
+| " -" x1.1 alone | 293 | 0 | 214 | 278 |
+
+- The " -" row alone harms the base model: X + Y - Z drops from 294 to 214.
+  The base reply is "585 + 375 = 960, 960 - 773 = 187". With the edit the
+  model writes "585 + 375 - 773 = " in one line and then fails ("= 952 -
+  773 = 180"). The row acts at two choices: after "X + Y" (" =", two
+  steps, or " -", one line) and after "= X+Y" (" -", go on, or "\n",
+  stop). It helps at the second and harms at the first. With "To" x1.25
+  the one-line form is already there, so only the help shows. A row edit
+  cannot tell the two places apart. Use " -" only with the "To" row.
+- Other checks of the three rows against the two rows: sums of four
+  numbers and products (seed 3) 188/216/165 against 188/218/165; word2
+  seed 6 206 against 207 of 227 well-posed; story loss 2.4636 against
+  2.4633 (x1.2: 2.4648).
+- A flaw in the earlier reply checks (sections 17 and 18): they used
+  `evalmath.prompt_ids`, which adds "Answer with only the final number."
+  to the question. The replies were short and could not show changes in
+  normal text. `replycheck.py` uses a plain chat turn (thinking off, 256
+  tokens, 30 prompts, many with hyphens, ranges and lists). Same reply as
+  the base model:
+
+| Edit | same of 30 | mean shared start (words) |
+|---|---|---|
+| "To" x1.25 | 23 | 57.5 |
+| " down" x1.1 | 27 | 67.3 |
+| "To" x1.25 + " down" x1.1 | 23 | 55.4 |
+| + " -" x1.1 | 20 | 51.3 |
+
+  The changes are fluent text, not damage. "To" starts replies with "To
+  ..." ("To calm down before an exam, ...") and writes "To-Do List" for
+  "to-do list". " down" adds the word ("cools down", "Break down the
+  exam"). " -" writes "9am - 5pm" for "9am-5pm" and " - " for an en dash.
+- Saved as `models/Qwen3-0.6B-to125-down110-minus110` (three rows;
+  git-ignored). From disk: logit difference 0.0; seed 8 hard set 541.
 
 ## Observations
 
@@ -810,8 +881,11 @@ Items marked "estimate" or "idea" are not measured.
   step and is right about 90% of the time on sums of four numbers, against
   12 to 18% for one-shot replies. Scaling one row of the output head (the
   token "To", x1.25) raises the hard set from 90 to 105 of 120 on new
-  questions, with almost no cost on stories (+0.0015) and 19 of 20 general
-  replies unchanged (section 17).
+  questions, with almost no cost on stories (+0.0015). In a plain chat
+  turn it changes 7 of 30 replies, mostly to a "To ..." start (section 19).
+- Two rows can interact. "To" x1.25 brings a reply form ("P + C - Q = " in
+  one line) where the model often stops after P + C; the row of " -" x1.1
+  repairs that, but alone it harms the base model (section 19).
 - Single choices in the reply decide many errors, and a small change in
   one output row can move them: " down" x1.1 after " round" lifts word
   problems with a remainder by 13 points on new questions, and leaves
