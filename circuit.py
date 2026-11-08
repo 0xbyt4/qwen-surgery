@@ -54,18 +54,21 @@ def products(n: int, seed: int) -> list[tuple[int, int]]:
 OPS = {"+": lambda a, b: a + b, "*": lambda a, b: a * b}
 
 
-def batch_ids(tok, pairs: list[tuple[int, int]], op: str = "+") -> tuple[mx.array, int]:
-    """Token ids [N, L] and the position of the first answer digit."""
+def batch_ids(
+    tok, pairs: list[tuple[int, int]], op: str = "+", width: int = 3
+) -> tuple[mx.array, int]:
+    """Token ids [N, L] and the position of the first answer digit. Each answer
+    must have `width` digits, one token each."""
     rows = []
     for a, b in pairs:
         ans = OPS[op](a, b)
         ids, n = scoring_ids(tok, f"What is {a} {op} {b}?", ans)
-        if n != len(ids) - 3:
-            raise ValueError(f"answer {ans} is not three tokens")
+        if n != len(ids) - width:
+            raise ValueError(f"answer {ans} is not {width} tokens")
         rows.append(ids)
     if len({len(x) for x in rows}) != 1:
         raise ValueError("prompts differ in length")
-    return mx.array(rows), len(rows[0]) - 3
+    return mx.array(rows), len(rows[0]) - width
 
 
 def run_blocks(model, x: mx.array, keep: bool = False, patch=None):
