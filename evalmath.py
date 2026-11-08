@@ -36,6 +36,9 @@ DEFAULT_MODEL = ROOT / "models" / "Qwen3-0.6B-bf16"
 INSTRUCTION = {
     "direct": "Answer with only the final number.",
     "think": "Give the final answer as a number on the last line.",
+    # Thinking off as in "direct", without the request for only the number.
+    "plain": "",
+    "steps": "Solve it step by step, then give the final number on the last line.",
 }
 NUMBER = re.compile(r"-?\d[\d,]*")
 # The direct replies look like "47 + 38 = 85"; score the number after a fixed lead.
@@ -59,7 +62,8 @@ class Item:
 
 
 def prompt_ids(tok: TokenizerWrapper, question: str, mode: str) -> list[int]:
-    messages = [{"role": "user", "content": f"{question}\n{INSTRUCTION[mode]}"}]
+    text = f"{question}\n{INSTRUCTION[mode]}" if INSTRUCTION[mode] else question
+    messages = [{"role": "user", "content": text}]
     return tok.apply_chat_template(
         messages, add_generation_prompt=True, enable_thinking=mode == "think"
     )

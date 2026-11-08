@@ -1,9 +1,10 @@
 """Score models on the GSM8K test set (1319 grade-school word problems).
 
 Data: data/gsm8k/test.jsonl from github.com/openai/grade-school-math (the
-answer is the number after "####"). Generation in direct mode (thinking off,
-greedy, evalmath.run), counted right when the last number of the reply is the
-answer. Questions whose answer is not a whole number are left out.
+answer is the number after "####"). Greedy generation (evalmath.run) in the
+--mode prompt (evalmath.INSTRUCTION; "direct" by default, thinking off),
+counted right when the last number of the reply is the answer. Questions
+whose answer is not a whole number are left out.
 
 Example:
     uv run python gsm8k.py --models models/Qwen3-0.6B-bf16 \
@@ -35,18 +36,20 @@ def gsm8k(limit: int | None = None) -> list[tuple[str, int]]:
     return out[:limit]
 
 
-def run_shared(model, tok, max_tokens: int, qa: list[tuple[str, int]]) -> list:
+def run_shared(
+    model, tok, mode: str, max_tokens: int, qa: list[tuple[str, int]]
+) -> list:
     """evalmath.run, again after a pause when other GPU jobs use the memory."""
     for _ in range(MAX_TRIES - 1):
         try:
-            return run(model, tok, "direct", max_tokens, qa)
+            return run(model, tok, mode, max_tokens, qa)
         except RuntimeError as e:
             if "Insufficient Memory" not in str(e):
                 raise
             print("GPU out of memory; waiting", flush=True)
             mx.clear_cache()
             time.sleep(60)
-    return run(model, tok, "direct", max_tokens, qa)
+    return run(model, tok, mode, max_tokens, qa)
 
 
 def main() -> None:
@@ -55,6 +58,7 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--batch", type=int, default=24)
     p.add_argument("--max-tokens", type=int, default=1024)
+    p.add_argument("--mode", default="direct", help="evalmath.INSTRUCTION key")
     p.add_argument("--name", default="gsm8k")
     a = p.parse_args()
 
@@ -65,7 +69,7 @@ def main() -> None:
         model, tok = load(path)
         items = []
         for i in range(0, len(qa), a.batch):
-            items += run_shared(model, tok, a.max_tokens, qa[i : i + a.batch])
+            items += run_shared(model, tok, a.mode, a.max_tokens, qa[i : i + a.batch])
         right = sum(i.correct for i in items)
         cut = sum(i.finish == "length" for i in items)
         tokens = sum(i.generation_tokens for i in items) / len(items)
