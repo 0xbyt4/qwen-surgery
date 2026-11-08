@@ -38,15 +38,18 @@ def mul2x2(n: int, seed: int) -> list[tuple[int, int]]:
     return out
 
 
-def reply_ids(tok, pairs: list[tuple[int, int]]) -> tuple[mx.array, int]:
+def reply_ids(
+    tok, pairs: list[tuple[int, int]], answers: list[int] | None = None
+) -> tuple[mx.array, int]:
     """Prompt + "A × B = P" token ids [N, L] and the position of the first
-    answer digit."""
+    answer digit. P is A * B, or the given answers (to fix the forced digits)."""
     rows = []
-    for a, b in pairs:
-        reply = tok.encode(f"{a} × {b} = {a * b}", add_special_tokens=False)
+    for i, (a, b) in enumerate(pairs):
+        ans = a * b if answers is None else answers[i]
+        reply = tok.encode(f"{a} × {b} = {ans}", add_special_tokens=False)
         tail = [tok.decode([t]) for t in reply[-WIDTH:]]
-        if tail != list(str(a * b)):
-            raise ValueError(f"{a * b} is not {WIDTH} digit tokens: {tail}")
+        if tail != list(str(ans)):
+            raise ValueError(f"{ans} is not {WIDTH} digit tokens: {tail}")
         rows.append(prompt_ids(tok, f"What is {a} * {b}?", "direct") + reply)
     if len({len(x) for x in rows}) != 1:
         raise ValueError("sequences differ in length")
