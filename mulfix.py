@@ -11,7 +11,8 @@ Edits tried, each alone:
   mlp:  all neurons of one block scaled by F.
 
 The search runs on the dev set (seed 2). Pass --edit to score one edit (in
-surgery.apply_spec form, or "attn:L*F" / "mlp:L*F") on the test set (seed 3).
+surgery.apply_spec form, or "attn:L*F" / "mlp:L*F") on the test set (seed 3,
+without the dev products).
 
 Example:
     uv run python mulfix.py --search
@@ -84,7 +85,7 @@ def main() -> None:
     model, tok = load(a.model)
     s = Surgeon(model)
     if a.edit:
-        test = mul2x2(a.n, 3)
+        test = mul2x2(a.n, 3, exclude=set(mul2x2(a.n, 2)))
         base = score(model, tok, test)
         apply(s, a.edit)
         edited = score(model, tok, test)

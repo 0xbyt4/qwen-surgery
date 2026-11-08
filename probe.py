@@ -6,9 +6,10 @@ digits before each scored digit are the right ones).
 
 For each answer digit and each block, a ridge-regression probe maps the
 residual after the block (at the position that writes the digit) to the
-one-hot digit. It is fit on one set of products and tested on another. The
-script prints the probe accuracy, the model's own accuracy (top digit token),
-and the probe accuracy on the examples where the model is wrong.
+one-hot digit. It is fit on one set of products and tested on another, with
+no shared product. The script prints the probe accuracy, the model's own
+accuracy (top digit token), and the probe accuracy on the examples where the
+model is wrong.
 
 Example:
     uv run python probe.py
@@ -28,13 +29,24 @@ from evalmath import DEFAULT_MODEL, ROOT, prompt_ids
 WIDTH = 4
 
 
-def mul2x2(n: int, seed: int) -> list[tuple[int, int]]:
+def mul2x2(
+    n: int, seed: int, exclude: set[tuple[int, int]] | None = None
+) -> list[tuple[int, int]]:
+    """n pairs with a four-digit product. With exclude (for a test set), the
+    pairs are unique and none of them is in exclude (for example the fit or
+    dev pairs); without it, pairs can repeat, as in the earlier runs."""
     r = random.Random(seed)
-    out = []
+    out: list[tuple[int, int]] = []
+    seen = set(exclude) if exclude is not None else None
     while len(out) < n:
         a, b = r.randint(10, 99), r.randint(10, 99)
-        if a * b >= 1000:
-            out.append((a, b))
+        if a * b < 1000:
+            continue
+        if seen is not None:
+            if (a, b) in seen:
+                continue
+            seen.add((a, b))
+        out.append((a, b))
     return out
 
 
@@ -108,7 +120,8 @@ def main() -> None:
     a = p.parse_args()
 
     model, tok = load(a.model)
-    fit, test = mul2x2(a.n_fit, 2), mul2x2(a.n_test, 3)
+    fit = mul2x2(a.n_fit, 2)
+    test = mul2x2(a.n_test, 3, exclude=set(fit))
     fit_r, _ = states(model, tok, fit)
     test_r, top = states(model, tok, test)
 
