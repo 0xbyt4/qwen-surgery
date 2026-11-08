@@ -929,6 +929,24 @@ prompt (with "Answer with only the final number."), greedy, thinking off,
   the machine) and were run again after a pause.
 - Open: the same comparison with the "plain" prompt (no instruction).
 
+## 23. The prompt explains the "To" gain (`gsm8k.py --mode plain`, `promptcheck.py`, `runs/gsm8k_plain.json`, `runs/promptcheck_s8.json`)
+
+The "plain" prompt is the question alone: no "Answer with only the final
+number." (thinking off, greedy).
+
+- Hard set, seed 8, 600 questions: the base model with the plain prompt
+  gets 537 (mul3x2 99, add4 91, word2 53, linear2 100, mixed 99, sub_big
+  95). With the direct prompt: base 443, two rows 538, three rows 541. The
+  row edits give the same score as dropping the request for only the
+  number: they write that prompt change into the weights. (The edited
+  model with the plain prompt was not run; the run was stopped.)
+- GSM8K, plain prompt: base 786 of 1319 (59.6%, 236.6 tokens, 12 cut),
+  three rows 774 (58.7%, 233.8 tokens, 15 cut). The prompt is worth +79
+  questions for the base model; the edit gives nothing on top.
+- Conclusion: the output-row edits do not add math skill. They undo a
+  prompt that asks for a bare number. They are useful only where the
+  prompt cannot be changed.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
