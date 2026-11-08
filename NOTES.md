@@ -612,6 +612,88 @@ Blocks (0 to 19 all score between -0.04 and 0.01):
   0.69 to 0.79 at earlier positions already after block 20: it is computed
   early, as for sums.
 
+## 17. The math gain is a reply-style choice, and one output row sets it (`tradeoff.py`, `runs/tradeoff_*.json`, `runs/add4_style.json`, `runs/outrow_s3.json`)
+
+Sets (generation, direct mode, greedy): add4 = sums of four three-digit
+numbers (200), mul2x2 (300), mul3x2 = three-digit by two-digit products
+(200, as in the hard set). A first run with 96 new tokens cut 96 of 200
+add4 replies; all runs below use 512 or 768 tokens and no reply is cut.
+
+Head subsets of block 20 x1.5 (seed 2; base add4 120, mul2x2 190):
+12-15 141/167, 12 119/181, 13 127/181, 14 118/190, 15 127/166, 12+13
+127/174, 14+15 136/175, 13-15 141/172, 12-14 122/176, 13+14 125/180, 13+14
+x2 132/161; 12-15 x1.25 131/174, x1.15 125/175. No subset gains on sums
+without a loss on products.
+
+Why the head edit helps sums:
+- The model answers a sum of four numbers in one of two styles: one shot
+  ("262 + 541 + 753 + 502 = **1,856**") or step by step ("To find the sum
+  ... 983 + 969 = 1952 ..."). One-shot replies are right 12 to 18% of the
+  time, step-by-step replies about 91%.
+- The head edit does not change these rates (one shot 0.18 to 0.19 and 0.12
+  to 0.10, step by step 0.93 to 0.91 and 0.90 to 0.91, seeds 2 and 3). It
+  changes the style: one-shot replies fall from 87 to 57 and from 84 to 48
+  of 200. All of its gain on sums is this shift.
+- The style is the first token of the reply: "To" (step by step) or a
+  digit. On 200 sums (seed 3) the base model starts with "To" 115 times,
+  the edited model 143 times (mean p("To") 0.43 to 0.47).
+- Forcing the base model to start with "To find the sum" gives 190 of 200
+  (seed 3; unforced 114). For products: "To find the product" gives mul2x2
+  234 of 300 (unforced 195) and mul3x2 157 of 200 (unforced 58); "Let's
+  break it down step by step." gives 233 and 149.
+
+The edit: scale the output-head row of the token "To" (id 1249). The head
+is tied to the input embedding, so the model gets its own copy of it
+(`surgery.scale_output_rows`, spec `out:1249*F`); the input embedding stays.
+The logit of "To" scales by F (at the reply start, about 26, so x1.1 adds
+2.6); no other logit changes.
+
+| Edit (seed 2) | add4 | mul2x2 | mul3x2 |
+|---|---|---|---|
+| none | 120 | 190 | 76 |
+| "To" x1.02 | 164 | 190 | 76 |
+| x1.04 | 185 | 190 | 76 |
+| x1.06 | 187 | 190 | 76 |
+| x1.1 | 189 | 190 | 82 |
+| x1.15 | 189 | 194 | 113 |
+| x1.2 | 189 | 215 | 153 |
+| x1.25 | 189 | 219 | 167 |
+| x1.3 | 189 | 221 | 170 |
+
+Products need a larger factor: at their reply start the "To" logit is about
+23 to 24 against 28 for the top digit.
+
+Full check on new questions (seed 3, 768 tokens, `editcheck.py`):
+
+| Edit | hard set | mul3x2 | add4 | word2 | mixed | sub_big | story loss |
+|---|---|---|---|---|---|---|---|
+| none | 90/120 | 8 | 11 | 14 | 19 | 18 | 2.4606 |
+| "To" x1.1 | 95 | 8 | 18 | 13 | 18 | 18 | 2.4607 |
+| "To" x1.25 | 105 | 16 | 18 | 13 | 18 | 20 | 2.4621 |
+| heads 12-15 x1.5 | 99 | 9 | 15 | 16 | 20 | 19 | 2.4665 |
+
+(linear2 is 20 in all rows. The math20 and held-out logprobs score the
+answer after the "The answer is " lead, so the "To" edit cannot change
+them: -1.887 and -3.112 in all three "none"/"To" rows.)
+
+- Other prompts: of 20 general questions (capital of France, a haiku, how
+  to boil an egg, ...), 19 replies are the same token for token. The one
+  that changed ("How can I convert Celsius to Fahrenheit?") now starts with
+  "To convert" and gives 9/5, where the base reply said 9.5.
+- Cost: the replies are longer. Hard set, seed 3: 87.4 new tokens per
+  question on average, 122.0 with "To" x1.25 (+40%).
+- Speed: no change. 3 alternating runs of 256 tokens: base 251.9 to 254.2
+  tok/s, edited 253.6 to 253.9 tok/s. The tied model reads the same matrix
+  as its output head; the input embedding is only a row lookup.
+- Saved as `models/Qwen3-0.6B-to125` (git-ignored, 1.50 GB, 0.31 GB more for
+  the own head; `config.json` has `tie_word_embeddings: false`). It loads
+  with `mlx_lm.load`; logit difference to the in-memory edit 0.0; mul3x2
+  seed 2: 167/200, as in memory.
+- This changes the reading of section 10: the head edit raised the hard
+  set mostly by pushing the model toward step-by-step replies, while it
+  lowered the arithmetic itself (products, section 15). The one-row edit
+  gets more of the style gain without the arithmetic loss.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -671,6 +753,15 @@ Items marked "estimate" or "idea" are not measured.
   more blocks after it: the tens digit forms over MLPs 21 to 25, the
   hundreds digit in 25 to 27. Late heads copy work from the previous answer
   position, and part of the next digit is ready one step early (section 16).
+- The largest math lever in this model is the reply style, not the
+  arithmetic circuit: with "To" at the reply start the model works step by
+  step and is right about 90% of the time on sums of four numbers, against
+  12 to 18% for one-shot replies. Scaling one row of the output head (the
+  token "To", x1.25) raises the hard set from 90 to 105 of 120 on new
+  questions, with almost no cost on stories (+0.0015) and 19 of 20 general
+  replies unchanged (section 17).
+- An edit can look like a skill gain and be a style change: check the
+  replies, not only the score (section 17 against section 10).
 - Steering needs a larger push than the class mean: at alpha 1 block 25
   moves 34 to 44% of answers, at alpha 4 it moves 96 to 100% (section 14).
 - Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
