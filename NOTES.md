@@ -417,6 +417,11 @@ additions), eta squared gives the share of its variance explained by a label.
 
 - 16 of the 86,016 MLP neurons of the model (0.02%) carry most of its
   arithmetic, and plain stories do not need them (+0.0003 loss).
+- Scaling these 16 neurons up does not help (seed 2, `runs/fourier21_scale_dev.json`):
+  x1.25, x1.5 and x2 give 95, 95 and 96 of 120 (base 94); the top 8 x1.5 give
+  95. Together with heads 12-15 x1.5 they give 96 and 98, against 97 for the
+  heads alone. The wave neurons are needed, but they are not what limits the
+  hard set.
 - The one-hot neurons of block 22 can be zeroed without loss: the digit is
   also carried by other neurons. The wave neurons of block 21 are a narrow
   point of the circuit.
