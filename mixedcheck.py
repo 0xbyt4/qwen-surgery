@@ -73,6 +73,7 @@ def main() -> None:
         items = run(model, tok, "direct", a.max_tokens, [(q, x) for q, x, _ in mx_set])
         row = {
             "mixed": sum(i.correct for i in items),
+            "mixed_right": [int(i.correct) for i in items],
             "dropped": sum(
                 not i.correct and i.predicted == pc
                 for i, (_, _, pc) in zip(items, mx_set, strict=True)
@@ -82,7 +83,8 @@ def main() -> None:
             row[name] = sum(i.correct for i in run(model, tok, "direct", 512, qa))
         s.restore()
         results[spec] = row
-        print(f"{spec:44s} {row}", flush=True)
+        counts = {k: v for k, v in row.items() if k != "mixed_right"}
+        print(f"{spec:44s} {counts}", flush=True)
     out = ROOT / "runs" / f"{a.name}_s{a.seed}.json"
     out.write_text(json.dumps({"config": vars(a), "results": results}, indent=2))
 

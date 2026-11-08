@@ -61,13 +61,14 @@ def main() -> None:
     for spec in a.edits.split(";"):
         if spec != "none":
             apply_spec(s, spec)
-        row, cut = {}, {}
+        row, cut, right = {}, {}, {}
         for k, qa in sets.items():
             items = run(model, tok, "direct", a.max_tokens, qa)
             row[k] = sum(i.correct for i in items)
             cut[k] = sum(i.finish == "length" for i in items)
+            right[k] = [int(i.correct) for i in items]
         s.restore()
-        results[spec] = {**row, "cut": cut}
+        results[spec] = {**row, "cut": cut, "right": right}
         cells = "  ".join(f"{k} {v:4d} (cut {cut[k]})" for k, v in row.items())
         print(f"{spec:40s} {cells}", flush=True)
     out = ROOT / "runs" / f"{a.name}_s{a.seed}.json"

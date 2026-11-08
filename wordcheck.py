@@ -99,12 +99,14 @@ def main() -> None:
             "well_posed": sum(items[i].correct for i in well),
             "n_well_posed": len(well),
             "all": sum(i.correct for i in items),
+            "right": [int(i.correct) for i in items],
         }
         for name, qs in extra.items():
             row[name] = sum(i.correct for i in run(model, tok, "direct", 512, qs))
         s.restore()
         results[spec] = row
-        print(f"{spec:32s} {row}", flush=True)
+        counts = {k: v for k, v in row.items() if k != "right"}
+        print(f"{spec:32s} {counts}", flush=True)
     out = ROOT / "runs" / f"{a.name}_s{a.seed}.json"
     out.write_text(json.dumps({"config": vars(a), "results": results}, indent=2))
 

@@ -61,6 +61,8 @@ def main() -> None:
             "hard_per_kind": dict(per_kind),
             "hard_logprob": mean([x.logprob for x in items]),
             "hard_cut": sum(x.finish == "length" for x in items),
+            # Per question (1 = right), in hard-set order, for paired tests.
+            "hard_right": [int(x.correct) for x in items],
             "math20": mean(answer_logprobs(model, tok, easy)),
             "heldout": mean(answer_logprobs(model, tok, held)),
             "text_nll": text_nll(model, tok, texts),
