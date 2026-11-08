@@ -89,3 +89,96 @@ unchanged.
   base, which is more than the 3.6% of one block. The base ran first in the
   same process, so this is not a valid speed result. Compare speeds only with
   alternating runs.
+
+## 3. Attention or MLP of one block off (`sweep_parts.py --part blocks`, `runs/sweep_blocks.json`)
+
+`surgery.py` zeros the input columns of `o_proj` (all heads) or `down_proj`
+(all MLP neurons) of one block. Zeroing both is identical to removing the
+block (max logit difference 0.0), and `restore()` gives the base logits back
+exactly.
+
+| Block | Attention off | MLP off |
+|---|---|---|
+| 0 | 0/20 (-25.8) | 13 (-2.25) |
+| 1 | 7 (-2.02) | 0 (-15.4) |
+| 2 | 12 (-2.22) | 0 (-16.8) |
+| 3 | 12 (-1.36) | 20 (-2.15) |
+| 4 | 19 (-2.04) | 16 (-2.55) |
+| 5 | 18 (-1.89) | 20 (-2.01) |
+| 6 | 17 (-2.73) | 16 (-2.62) |
+| 7 | 16 (-2.26) | 18 (-2.23) |
+| 8 | 19 (-1.74) | 20 (-1.93) |
+| 9 | 14 (-1.86) | 19 (-2.46) |
+| 10 | 18 (-2.73) | 16 (-2.96) |
+| 11 | 14 (-4.42) | 19 (-2.47) |
+| 12 | 17 (-3.10) | 19 (-2.69) |
+| 13 | 19 (-2.51) | 18 (-3.19) |
+| 14 | 17 (-2.30) | 20 (-1.90) |
+| 15 | 20 (-2.63) | 18 (-3.18) |
+| 16 | 19 (-1.57) | 18 (-3.65) |
+| 17 | 12 (-3.67) | 15 (-3.10) |
+| 18 | 17 (-2.29) | 15 (-5.33) |
+| 19 | 16 (-2.50) | 12 (-3.95) |
+| 20 | **3 (-8.10)** | 11 (-4.86) |
+| 21 | 19 (-1.85) | **5 (-6.19)** |
+| 22 | 18 (-2.14) | 10 (-4.14) |
+| 23 | 19 (-2.09) | 16 (-3.22) |
+| 24 | 17 (-1.58) | 12 (-4.06) |
+| 25 | 15 (-2.56) | 18 (-3.63) |
+| 26 | 18 (-1.85) | 19 (-2.19) |
+| 27 | 16 (-1.86) | 11 (-2.30), 5120 tokens |
+
+Values: correct answers out of 20 (mean logprob of the right answer; base
+20/20, -1.87).
+
+- Block 20: the attention is the critical part (3/20). Its MLP costs less
+  (11/20). The MLPs of blocks 21, 22, 19 and 24 come next (5, 10, 12, 12).
+  A possible reading: attention in block 20 brings the operands together and
+  the later MLPs compute the result. This is a hypothesis; the head and
+  neuron tests below check parts of it.
+- Block 27: the MLP, not the attention, makes the end-of-turn token. Without
+  it, every reply runs to the 256-token limit, but the logprob stays near the
+  base.
+- Early blocks: block 0 needs its attention; blocks 1 and 2 need their MLPs.
+- Attention off in block 3: the logprob gets better (-1.36) but the score
+  falls to 12/20, with fewer tokens (424 against 957). The model obeys "only
+  the final number" more often and then gets the word problems wrong.
+
+## 4. MLP neurons of block 20 (`neurons.py --layer 20`, `runs/neurons20.json`)
+
+- Attribution: the gradient of the summed answer logprob on math20 with
+  respect to a scale on each of the 3072 neurons. One backward pass per
+  question.
+- Held-out set: 40 random questions from `mathgen.py` (seed 1), of the same
+  kinds. The base gets 37/40, mean logprob -3.11.
+- Control: 3 random sets of each size.
+
+| Zeroed neurons | math20 | math20 logprob | held-out | held-out logprob |
+|---|---|---|---|---|
+| none | 20/20 | -1.87 | 37/40 | -3.11 |
+| top 1 (neuron 2530) | 18 | -2.22 | 37 | -3.32 |
+| top 4 | 19 | -2.67 | 32 | -3.61 |
+| top 16 | 13 | -4.38 | 27 | -4.94 |
+| top 64 | 12 | -5.90 | 24 | -5.79 |
+| top 256 | 11 | -6.53 | 21 | -7.05 |
+| random 16 (3 sets) | 17 to 19 | -1.80 to -1.86 | 37 to 38 | -3.11 to -3.15 |
+| random 64 (3 sets) | 18 to 20 | -1.86 to -2.36 | 36 to 37 | -3.14 to -3.51 |
+| random 256 (3 sets) | 19 to 20 | -1.86 to -2.45 | 35 to 38 | -3.39 to -3.83 |
+| bottom 16 | 20 | -1.45 | 36 | -2.94 |
+| bottom 64 | 18 | -1.31 | 37 | -2.68 |
+| bottom 256 | 19 | -2.11 | 33 | -3.19 |
+
+- 16 of 3072 neurons (0.5%) carry much of the math effect of this MLP: the
+  held-out score falls from 37 to 27 of 40. Random sets of 16 change nothing.
+  The effect holds on questions that were not used to choose the neurons.
+- 256 top neurons give about the same math20 score as the whole MLP off (11
+  against 11).
+- Zeroing the bottom 64 neurons makes the right answer more likely on both
+  sets (math20 -1.87 to -1.31, held-out -3.11 to -2.68), but the scores do
+  not rise. It is not yet known whether this costs other skills; a test on
+  general text is needed.
+- Noise: a random single neuron with no logprob change can still move math20
+  from 20 to 18, because one changed token changes a greedy reply. Read small
+  score changes on 20 questions with care; the logprob is the better measure.
+- The first-order estimate ranks well but is too small: for the top 16 it
+  predicts a summed change of -18.9, and the measured change is -50.2.
