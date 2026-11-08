@@ -51,6 +51,11 @@ def main() -> None:
     for name in COPY:
         if (src / name).exists():
             shutil.copy(src / name, out / name)
+    if not model.args.tie_word_embeddings:
+        # The edit untied the output head (surgery.scale_output_rows).
+        config = json.loads((out / "config.json").read_text())
+        config["tie_word_embeddings"] = False
+        (out / "config.json").write_text(json.dumps(config, indent=2) + "\n")
     (out / "EDIT.json").write_text(
         json.dumps({"base": str(src), "edit": a.edit}, indent=2) + "\n"
     )
