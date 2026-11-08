@@ -75,24 +75,42 @@ def parse(text: str, mode: str) -> int | None:
     return int(found[-1].replace(",", "")) if found else None
 
 
-def answer_logprob(model, tok: TokenizerWrapper, question: str, answer: int) -> float:
-    """log p(answer digits | direct prompt + ANSWER_PREFIX), teacher forced."""
+def scoring_ids(tok: TokenizerWrapper, question: str, answer: int) -> tuple[list, int]:
+    """Direct prompt + ANSWER_PREFIX + answer digits, and the prompt length."""
     ids = prompt_ids(tok, question, "direct")
     head = tok.encode(ANSWER_PREFIX, add_special_tokens=False)
     full = tok.encode(ANSWER_PREFIX + str(answer), add_special_tokens=False)
     if full[: len(head)] != head:
         raise ValueError(f"prefix tokens change before {answer}")
-    ids += head
-    target = full[len(head) :]
-    x = mx.array([ids + target])
-    logits = model(x)[0, len(ids) - 1 : -1].astype(mx.float32)
+    return ids + full, len(ids) + len(head)
+
+
+def sequence_logprob(model, ids: list[int], n_prompt: int) -> mx.array:
+    """Sum of log p(token) over ids[n_prompt:], teacher forced."""
+    logits = model(mx.array([ids]))[0, n_prompt - 1 : -1].astype(mx.float32)
     lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
-    return mx.take_along_axis(lp, mx.array(target)[:, None], axis=-1).sum().item()
+    target = mx.array(ids[n_prompt:])[:, None]
+    return mx.take_along_axis(lp, target, axis=-1).sum()
 
 
-def run(model, tok: TokenizerWrapper, mode: str, max_tokens: int) -> list[Item]:
+def answer_logprob(model, tok: TokenizerWrapper, question: str, answer: int) -> float:
+    """log p(answer digits | direct prompt + ANSWER_PREFIX), teacher forced."""
+    return sequence_logprob(model, *scoring_ids(tok, question, answer)).item()
+
+
+def default_qa() -> list[tuple[str, int]]:
+    return [(q, a) for (q, _), a in zip(QUESTIONS, ANSWERS, strict=True)]
+
+
+def run(
+    model,
+    tok: TokenizerWrapper,
+    mode: str,
+    max_tokens: int,
+    qa: list[tuple[str, int]] | None = None,
+) -> list[Item]:
     items = []
-    for (question, _), answer in zip(QUESTIONS, ANSWERS, strict=True):
+    for question, answer in qa or default_qa():
         start = time.perf_counter()
         text, last = "", None
         for r in stream_generate(
