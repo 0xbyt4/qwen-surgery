@@ -59,6 +59,7 @@ def main() -> None:
     p.add_argument("--n", type=int, default=300)
     p.add_argument("--max-tokens", type=int, default=768)
     p.add_argument("--edits", required=True, help='";"-separated; "none" = base')
+    p.add_argument("--name", default="mixedcheck")
     a = p.parse_args()
 
     model, tok = load(a.model)
@@ -82,7 +83,7 @@ def main() -> None:
         s.restore()
         results[spec] = row
         print(f"{spec:44s} {row}", flush=True)
-    out = ROOT / "runs" / f"mixedcheck_s{a.seed}.json"
+    out = ROOT / "runs" / f"{a.name}_s{a.seed}.json"
     out.write_text(json.dumps({"config": vars(a), "results": results}, indent=2))
 
 

@@ -2,8 +2,8 @@
 
 word2: the hard-set word problem (mathgen), 300 per seed. "Any extra kept
 aside" asks for the whole part of the share. When the gift is larger than
-the stock (A * B <= C) the set expects 0; those questions are ill-posed and
-are counted apart.
+the stock (A * B < C) the set expects 0; those questions are ill-posed and
+are counted apart (well_posed counts A * B >= C).
 
 Counter-sets, where rounding to the nearest whole number is right (the
 fraction is 0.5 or more), 100 each:
@@ -18,6 +18,7 @@ Example:
 import argparse
 import json
 import random
+import re
 
 from mlx_lm import load
 
@@ -30,6 +31,12 @@ def word2(n: int, seed: int) -> list[tuple[str, int]]:
     k = HARD_KINDS.index("word2")
     every = hard_questions(n * len(HARD_KINDS), seed)
     return [x for i, x in enumerate(every) if i % len(HARD_KINDS) == k]
+
+
+def well_posed(question: str) -> bool:
+    """The stock A * B is at least the gift C."""
+    a, b, c = (int(x) for x in re.findall(r"\d+", question)[:3])
+    return a * b >= c
 
 
 def rounding_sets(n: int, seed: int) -> dict[str, list[tuple[str, int]]]:
@@ -75,12 +82,13 @@ def main() -> None:
     p.add_argument("--rounding", action="store_true", help="also the counter-sets")
     p.add_argument("--max-tokens", type=int, default=768)
     p.add_argument("--edits", required=True, help='";"-separated; "none" = base')
+    p.add_argument("--name", default="wordcheck")
     a = p.parse_args()
 
     model, tok = load(a.model)
     s = Surgeon(model)
     qa = word2(a.n, a.seed)
-    well = [i for i, (_, ans) in enumerate(qa) if ans != 0]
+    well = [i for i, (q, _) in enumerate(qa) if well_posed(q)]
     extra = rounding_sets(100, 7) if a.rounding else {}
     results = {}
     for spec in a.edits.split(";"):
@@ -97,7 +105,7 @@ def main() -> None:
         s.restore()
         results[spec] = row
         print(f"{spec:32s} {row}", flush=True)
-    out = ROOT / "runs" / f"wordcheck_s{a.seed}.json"
+    out = ROOT / "runs" / f"{a.name}_s{a.seed}.json"
     out.write_text(json.dumps({"config": vars(a), "results": results}, indent=2))
 
 

@@ -1,7 +1,7 @@
 """Score head edits on two skills at once: sums of four numbers and products.
 
 Generation in direct mode (greedy), counted as right when the last number
-of the reply is the answer:
+of the reply is the answer; "cut" counts replies that hit --max-tokens:
   add4:   A + B + C + D, each three-digit;
   mul2x2: A * B, both two-digit, four-digit product;
   mul3x2: A * B, A three-digit, B two-digit (as in the hard set).
@@ -61,13 +61,14 @@ def main() -> None:
     for spec in a.edits.split(";"):
         if spec != "none":
             apply_spec(s, spec)
-        row = {
-            k: sum(i.correct for i in run(model, tok, "direct", a.max_tokens, qa))
-            for k, qa in sets.items()
-        }
+        row, cut = {}, {}
+        for k, qa in sets.items():
+            items = run(model, tok, "direct", a.max_tokens, qa)
+            row[k] = sum(i.correct for i in items)
+            cut[k] = sum(i.finish == "length" for i in items)
         s.restore()
-        results[spec] = row
-        cells = "  ".join(f"{k} {v:4d}" for k, v in row.items())
+        results[spec] = {**row, "cut": cut}
+        cells = "  ".join(f"{k} {v:4d} (cut {cut[k]})" for k, v in row.items())
         print(f"{spec:40s} {cells}", flush=True)
     out = ROOT / "runs" / f"{a.name}_s{a.seed}.json"
     out.write_text(json.dumps({"config": vars(a), "results": results}, indent=2))
