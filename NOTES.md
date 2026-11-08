@@ -337,6 +337,13 @@ to -1.58 for the top 16 x1.5).
   (max difference 0.0), and it gives the same hard-set result (seed 3: 99/120,
   same counts per kind).
 
+- Price on products (found later, section 15): this model is worse at
+  two-digit by two-digit products. Generation on 500 new products: 288
+  correct against 332 for the base model (-8.8 points; two runs each, same
+  counts). The hard set did not show it: its products (three-digit by
+  two-digit) are right only 3 to 9 of 20 times, so the set cannot see a
+  loss there. The edit trades one skill for another; it is not a free gain.
+
 ## 12. Where the answer digit forms (`circuit.py`, `runs/lens_add2.log`, `runs/patch_add2.log`)
 
 Data: 200 two-digit additions with a three-digit sum, direct prompt, the
@@ -504,6 +511,52 @@ give 0.000 to 0.012:
   the top 64 leaves 0.944) and its top 64 for products share 9 neurons with
   the top 64 for sums (neuron 2591, the period-2 "even" wave, is in both).
 
+## 15. Two-digit products: where the errors are, and what does not fix them (`probe.py`, `mulfix.py`, `runs/probe_mul2x2.json`, `runs/mulfix_search.json`)
+
+Task: A * B with A and B two-digit and a four-digit product. In generation
+(direct mode, 200 questions) the model is right 133 times; three-digit by
+one-digit products and three-digit sums are right 198 times. The model
+replies as "79 × 26 = 2014", so the tests below use that format with teacher
+forcing. With the "The answer is " lead the model must give the first digit
+without writing the sum first, and three-digit sums then fail (thousands
+digit right 24%): that format is not usable here.
+
+Per digit, teacher forced, 1000 products (seed 3): thousands 0.971, hundreds
+0.844, tens 0.784, units 0.997; all four 0.67.
+
+- Hundreds errors are carry errors: 146 of 156 are +1 or -1 off. Tens
+  errors are spread over all offsets.
+- The errors are confident: the right digit is second in 97% (hundreds) and
+  88% (tens) of cases, but the median log probability gap to the top digit
+  is about 3, and only 14 to 24% of errors have a gap below 1.
+- A ridge probe per block (fit on 3000 products, seed 2) on the residual at
+  the digit position. On model errors, the block 25 probe is right 53%
+  (hundreds) and 55% (tens), but on model-right examples it is right only
+  85% and 86%: the probe is weak where the model is weak. This is not
+  evidence of a right digit hidden inside.
+- The block 27 probe beats the model's own output: hundreds 0.882 against
+  0.844, tens 0.857 against 0.784. A per-digit bias on the model's logits
+  gives only 0.858 and 0.800, and a probe on the operand digits alone gives
+  0.246 and 0.141, so the gain is neither calibration nor a simple shortcut.
+- But it does not transfer. One probe fit on all digits of these products
+  lifts them from 0.668 to 0.731 (all digits right), and lowers three-digit
+  by one-digit products from 0.985 to 0.954, three-digit sums from 0.984 to
+  0.980 and three-digit by two-digit products from 0.249 to 0.237. A probe
+  fit on labels learns the task; it does not show a general flaw in the
+  output head.
+- Weight-scale search (`mulfix.py --search`, seed 2, 1000 products, all
+  four digits right; base 0.649): the block 25 digit code x1.25 to x2
+  (16 or 64 neurons) gives -0.030 to +0.010; the attention or MLP of one
+  block of 16 to 27 x0.8 or x1.25 gives -0.080 to +0.026. The best dev edits
+  on 2000 new products (base 0.672): MLP 17 x1.25 0.678, MLP 18 x1.25 0.667,
+  both 0.652, MLP 25 x1.25 0.676, attention 25 x0.8 0.674. All within noise:
+  the dev gains were selection noise.
+- Making the block 25 digit code stronger does not help, though writing it
+  works (section 14): when the model is wrong, the code holds the wrong digit.
+- The block 20 math-head edit of section 10 hurts these products: teacher
+  forced 0.672 to 0.597 (x1.5), 0.648 (x1.25), 0.653 (heads 8, 12-15 x1.25);
+  in generation 332 to 288 of 500 (x1.5).
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -552,6 +605,13 @@ Items marked "estimate" or "idea" are not measured.
   one-hot digit code that is the same for the tens digit of a sum and the
   units digit of a product; 64 of its neurons, set with values from sums
   alone, write any digit into either task (section 14).
+- A weight edit that helps one skill can hurt another that the test set
+  does not cover well: the block 20 head edit lifts sums of four numbers
+  (+4 of 20) and lowers two-digit products (-8.8 points), and the hard set
+  missed the loss (section 15). Each edit needs a check on each kind of task,
+  with enough questions where the base model is not near 0 or 100%.
+- The two-digit product errors are confident carry errors, and no single
+  scale of a block, an MLP or the digit code fixes them (section 15).
 - Steering needs a larger push than the class mean: at alpha 1 block 25
   moves 34 to 44% of answers, at alpha 4 it moves 96 to 100% (section 14).
 - Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
