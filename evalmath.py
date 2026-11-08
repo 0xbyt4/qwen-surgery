@@ -76,13 +76,16 @@ def parse(text: str, mode: str) -> int | None:
 
 
 def scoring_ids(tok: TokenizerWrapper, question: str, answer: int) -> tuple[list, int]:
-    """Direct prompt + ANSWER_PREFIX + answer digits, and the prompt length."""
+    """Direct prompt + ANSWER_PREFIX + answer, and the prompt length. The
+    scored part starts at the first token that differs from the lead alone
+    (for "-34" the space and the minus sign form one token)."""
     ids = prompt_ids(tok, question, "direct")
     head = tok.encode(ANSWER_PREFIX, add_special_tokens=False)
     full = tok.encode(ANSWER_PREFIX + str(answer), add_special_tokens=False)
-    if full[: len(head)] != head:
-        raise ValueError(f"prefix tokens change before {answer}")
-    return ids + full, len(ids) + len(head)
+    same = 0
+    while same < min(len(head), len(full)) and head[same] == full[same]:
+        same += 1
+    return ids + full, len(ids) + same
 
 
 def head_f32(model, h: mx.array) -> mx.array:
