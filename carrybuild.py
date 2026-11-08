@@ -52,13 +52,16 @@ from collections.abc import Callable
 
 import mlx.core as mx
 import numpy as np
-from mlx_lm import load
+from mlx_lm import batch_generate, load
 
 from carrycollect import mlp_inputs
 from circuit import run_blocks
-from evalmath import DEFAULT_MODEL, ROOT, run
+from evalmath import DEFAULT_MODEL, ROOT, prompt_ids, run
+from mathgen import hard_questions
+from mixedcheck import sub_big, three
 from mulfix import score
 from probe import WIDTH, mul2x2, reply_ids
+from replycheck import PROMPTS, chat_ids, replies
 from surgery import Surgeon
 from textcheck import text_nll
 
@@ -131,6 +134,82 @@ def story_inputs(model, tok, block: int, lines: list[str], max_tokens=256):
     return np.concatenate(out)
 
 
+def seq_inputs(model, block: int, seqs: list[list[int]]) -> np.ndarray:
+    """MLP input of block at every position of token sequences: [M, d]."""
+    out = []
+    for ids in seqs:
+        n = mlp_inputs(model, mx.array([ids]), [block])[block]
+        out.append(np.array(n[0].astype(mx.float32)))
+    return np.concatenate(out)
+
+
+CHAT = [
+    "What is the largest ocean on Earth?",
+    "Give me two ideas for a rainy weekend.",
+    "Who wrote Pride and Prejudice?",
+    "Explain photosynthesis in one paragraph.",
+    "What is the boiling point of water in Fahrenheit?",
+    "List four countries in South America.",
+    "How do I make a cup of green tea?",
+    "Write a haiku about autumn leaves.",
+    "What year did the first person walk on the Moon?",
+    "Describe a cat to someone who has never seen one.",
+    "What is the difference between a virus and a bacterium?",
+    "Suggest a name for a small bakery.",
+    "How many legs does a spider have?",
+    "What is the capital of Canada?",
+    "Write a short thank-you note to a teacher.",
+    "Why is the sky blue?",
+    "Give me a 3-step plan to learn to swim.",
+    "What are the primary colors?",
+    "Translate 'thank you' into German and Italian.",
+    "What does a 24-hour clock show at 3 pm?",
+    "Name five animals that live in the Arctic.",
+    "How far is the Moon from the Earth, roughly?",
+    "Write a limerick about a dog.",
+    "What is the tallest mountain in Africa?",
+    "Explain what a prime number is.",
+    "What is 12 minus 5?",
+    "Give a short recipe for scrambled eggs.",
+    "Who painted the Mona Lisa?",
+    "What is the population of Tokyo, roughly?",
+    "List the days of the week in order.",
+]
+
+
+def negative_seqs(model, tok, max_tokens: int = 256) -> list[list[int]]:
+    """Prompt + base reply token ids of chat prompts (CHAT, not the
+    replycheck prompts) and of other math tasks, as states where the new
+    neurons must stay silent. Seeds differ from the side-task seeds."""
+    seqs = []
+    sets = [
+        ("plain", hard_questions(150, 9)),
+        ("direct", three(60, 13)),
+        ("direct", sub_big(60, 13)),
+    ]
+    chat = [chat_ids(tok, q) for q in CHAT]
+    r = batch_generate(
+        model,
+        tok,
+        chat,
+        max_tokens=max_tokens,
+        completion_batch_size=len(chat),
+        prefill_batch_size=len(chat),
+    )
+    for ids, text in zip(chat, r.texts, strict=True):
+        seqs.append(ids + tok.encode(text, add_special_tokens=False))
+    for mode, qa in sets:
+        for i in range(0, len(qa), 50):
+            for it, (q, _) in zip(
+                run(model, tok, mode, max_tokens, qa[i : i + 50]),
+                qa[i : i + 50],
+                strict=True,
+            ):
+                reply = tok.encode(it.output, add_special_tokens=False)
+                seqs.append((prompt_ids(tok, q, mode) + reply)[: 2 * max_tokens])
+    return seqs
+
+
 class Neurons:
     """Rows of new neurons for one block, built in numpy."""
 
@@ -160,13 +239,20 @@ class Stage:
     """Readouts at the MLP input of one block. Value readouts are fit on the
     hundreds and tens positions of the fit products. The context readout
     ("ctx": 1 at those positions, 0 at all other positions of the product
-    sequences and of the stories), the position readouts and a constant
-    are fit on all of these states."""
+    sequences, of the stories and of other math replies), the position
+    readouts and a constant are fit on all of these states."""
 
-    def __init__(self, model, tok, fit, block, story_lines, y, n_other=400) -> None:
+    def __init__(
+        self, model, tok, fit, block, story_lines, y, neg, n_other=400
+    ) -> None:
         n = product_inputs(model, tok, fit, block)
         other = other_inputs(model, tok, fit[:n_other], block)
-        st = story_inputs(model, tok, block, story_lines)
+        st = np.concatenate(
+            [
+                story_inputs(model, tok, block, story_lines),
+                seq_inputs(model, block, neg),
+            ]
+        )
         self.used = n[:, [HUNDREDS, TENS]].reshape(-1, n.shape[-1])
         self.all = np.concatenate([self.used, other, st])
         is_ctx = np.r_[np.ones(len(self.used)), np.zeros(len(other) + len(st))]
@@ -251,6 +337,19 @@ def quiet_directions(
     return w / np.linalg.norm(w, axis=1, keepdims=True)
 
 
+def reply_fit(model, tok, seqs: list[tuple[int, list[int]]]):
+    """Teacher forced on fixed chat replies (prompt length, ids): the top-1
+    token at each reply position and the mean NLL of the reply tokens."""
+    top, nll = [], []
+    for k, ids in seqs:
+        logits = model(mx.array([ids]))[0, k - 1 : -1].astype(mx.float32)
+        lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+        tgt = mx.array(ids[k:])
+        top.append(np.array(mx.argmax(logits, axis=-1)))
+        nll.append(np.array(-mx.take_along_axis(lp, tgt[:, None], axis=-1)[:, 0]))
+    return np.concatenate(top), float(np.concatenate(nll).mean())
+
+
 def final_rms(model, tok, pairs) -> float:
     """rms of the last residual (before the final norm) at the answer positions."""
     x, first = reply_ids(tok, [tuple(p) for p in pairs])
@@ -259,15 +358,25 @@ def final_rms(model, tok, pairs) -> float:
     return float(np.sqrt((h**2).mean()))
 
 
+SEPARATORS = [" ", ",", ".", "\n", "\n\n", ".  ", " **", "**"]
+
+
 def digit_push(model, tok, margin: float) -> np.ndarray:
-    """[10, d] residual vectors that raise the logit of each digit by about
-    margin against the other digits, through the final norm and the output
-    head, for a residual of rms 1 (multiply by the real rms)."""
+    """[10, d] residual vectors (least norm) that raise the logit of one digit
+    by margin and leave the logits of the other digits and of separator
+    tokens (space, comma, period, newline, bold) unchanged, through the
+    final norm and the output head, for a residual of rms 1 (multiply by
+    the real rms)."""
     ids = [tok.encode(str(d), add_special_tokens=False)[0] for d in range(10)]
+    ids += sorted(
+        {tok.encode(x, add_special_tokens=False)[0] for x in SEPARATORS} - set(ids)
+    )
     e = np.array(model.model.embed_tokens.weight[mx.array(ids)].astype(mx.float32))
     g = np.array(model.model.norm.weight.astype(mx.float32))
-    v = g * (e - e.mean(0))
-    return margin * v / (v * v).sum(1, keepdims=True)
+    a = (g * e).astype(np.float64)  # logit change = a @ delta
+    target = np.zeros((len(ids), 10))
+    target[np.arange(10), np.arange(10)] = margin
+    return (a.T @ np.linalg.solve(a @ a.T, target)).T
 
 
 def lookup(
@@ -362,6 +471,22 @@ def generate(model, tok, qa: list[tuple[str, int]], batch: int = 100) -> list:
     return out
 
 
+def side_sets(model, tok) -> dict[str, list]:
+    """Right or wrong per question on other tasks, and chat replies: the hard
+    set (plain prompt, seed 8), X + Y - Z and five-digit minus four-digit
+    (direct prompt, seed 12), and the replycheck prompts."""
+    out: dict[str, list] = {}
+    hard = hard_questions(600, 8)
+    items = []
+    for i in range(0, len(hard), 50):
+        items += run(model, tok, "plain", 768, hard[i : i + 50])
+    out["hard_plain"] = [int(i.correct) for i in items]
+    for name, qa in [("three", three(300, 12)), ("sub_big", sub_big(300, 12))]:
+        out[name] = [int(i.correct) for i in run(model, tok, "direct", 512, qa)]
+    out["reply"] = replies(model, tok, 256)
+    return out
+
+
 def sign_p(gained: int, lost: int) -> float:
     """Two-sided sign test (exact McNemar) on the discordant pairs."""
     n, k = gained + lost, min(gained, lost)
@@ -381,7 +506,10 @@ def main() -> None:
     p.add_argument("--name", default="carrybuild")
     p.add_argument("--debug", action="store_true")
     p.add_argument("--gen", type=int, default=0, help="new products to generate")
+    p.add_argument("--gen-seed", type=int, default=4)
+    p.add_argument("--side", action="store_true", help="score other tasks too")
     p.add_argument("--relay", type=int, default=21, help="relay block; -1: none")
+    p.add_argument("--ctx-block", type=int, default=15)
     a = p.parse_args()
 
     b0, b1, b2, b3, b4 = (int(x) for x in a.blocks.split(","))
@@ -395,28 +523,71 @@ def main() -> None:
     texts = [json.loads(x)["text"] for x in test_lines]
     log: dict = {"config": vars(a), "readout_max_err": {}, "stages": {}}
 
+    base_replies: list[str] = []
+    base_seqs: list[tuple[int, list[int]]] = []
+    base_fit: list = []
+
     def check(tag: str) -> None:
-        """Score and story loss with the neurons inserted so far."""
+        """Score, story loss and chat replies (same as the base model, of the
+        replycheck prompts, 96 tokens) with the neurons inserted so far."""
         all_, digits = score(model, tok, [tuple(x) for x in test])
         nll = text_nll(model, tok, texts[:50])
-        log["stages"][tag] = {"all": all_, "digits": digits, "story_nll_50": nll}
+        rep = replies(model, tok, 96)
+        if not base_replies:
+            base_replies.extend(rep)
+            for q, r in zip(PROMPTS, rep, strict=True):
+                k = len(chat_ids(tok, q))
+                base_seqs.append((k, chat_ids(tok, q) + tok.encode(r)))
+            base_fit.extend(reply_fit(model, tok, base_seqs))
+        same = sum(x == z for x, z in zip(rep, base_replies, strict=True))
+        top, rnll = reply_fit(model, tok, base_seqs)
+        agree = float((top == base_fit[0]).mean())
+        log["stages"][tag] = {
+            "all": all_,
+            "digits": digits,
+            "story_nll_50": nll,
+            "reply_same": same,
+            "reply_top1_agree": agree,
+            "reply_nll": rnll,
+        }
         print(
             f"  after {tag}: all {all_:.3f} digits "
-            f"{[round(d, 3) for d in digits]} story nll (50) {nll:.4f}",
+            f"{[round(d, 3) for d in digits]} story nll (50) {nll:.4f} "
+            f"replies same {same}/{len(rep)}, teacher-forced top-1 agree "
+            f"{agree:.4f} reply nll {rnll:.4f} (base {base_fit[1]:.4f})",
             flush=True,
         )
 
     check("none")
+    neg = negative_seqs(model, tok)
+    print(f"negative sequences: {len(neg)}, tokens {sum(map(len, neg))}", flush=True)
 
-    # ---- B0: operand flags -----------------------------------------------
-    st = Stage(model, tok, fit, b0, fit_lines, y)
-    quiet = quiet_directions(model, b0 + 1, st.all, st.g, 40 + sum(SIZES.values()))
+    # ---- C (block before B0): the context flag ----------------------------
+    st = Stage(model, tok, fit, a.ctx_block, fit_lines, y, neg)
+    quiet = quiet_directions(
+        model, a.ctx_block + 1, st.all, st.g, 40 + sum(SIZES.values())
+    )
     dirs, at = {}, 0
     for name in [*OPERANDS, *SIZES]:
         size = SIZES.get(name, 10)
         dirs[name] = a.alpha * quiet[at : at + size]
         at += size
-    nn, gaps = Neurons(), {}
+    gaps = {}
+    sc = st.all @ st.ctx
+    lo = float(np.percentile(sc[st.is_ctx == 0], 99.99))
+    hi = float(np.percentile(sc[st.is_ctx == 1], 0.01))
+    gaps["ctx"] = hi - lo
+    mid, half = (lo + hi) / 2, max(hi - lo, 0.02) / 2
+    z = (st.ctx - (mid - half / 2) * st.const) * (S / BETA) / half
+    nn = Neurons()
+    nn.clamp(z, st.const, dirs["ctx"][0], st.const)
+    nn.insert(s, a.ctx_block)
+    print(f"C block {a.ctx_block}: ctx gap {gaps['ctx']:.3f}", flush=True)
+    check("C")
+
+    # ---- B0: operand flags, times the context flag ------------------------
+    st = Stage(model, tok, fit, b0, fit_lines, y, neg)
+    nn = Neurons()
     for name in OPERANDS:
         r, _ = st.onehot(name, 10, everywhere=False)
         sc, yy = st.used @ r, np.repeat(y[name], 2)
@@ -428,29 +599,18 @@ def main() -> None:
             mid, half = (lo + hi) / 2, max(hi - lo, 0.02) / 2
             # 0 below mid - half / 2, 1 above mid + half / 2 (fit states)
             z = (r[:, i] - (mid - half / 2) * st.const) * (S / BETA) / half
-            nn.clamp(z, st.ctx, dirs[name][i], st.const)
-    sc = st.all @ st.ctx
-    lo = float(np.percentile(sc[st.is_ctx == 0], 99.99))
-    hi = float(np.percentile(sc[st.is_ctx == 1], 0.01))
-    gaps["ctx"] = hi - lo
-    mid, half = (lo + hi) / 2, max(hi - lo, 0.02) / 2
-    z = (st.ctx - (mid - half / 2) * st.const) * (S / BETA) / half
-    nn.clamp(z, st.const, dirs["ctx"][0], st.const)
+            nn.clamp(z, st.ctx, dirs[name][i], st.const)  # up: the context flag
     log["flag_gaps_fit"] = gaps
     k0 = nn.insert(s, b0)
     smallest = sorted(gaps.items(), key=lambda x: x[1])[:4]
-    print(
-        f"B0 block {b0}: {k0} neurons; ctx gap {gaps['ctx']:.3f}; "
-        f"smallest fit gaps {smallest}",
-        flush=True,
-    )
+    print(f"B0 block {b0}: {k0} neurons; smallest fit gaps {smallest}", flush=True)
     check("B0")
 
     def one(name: str, v: int) -> np.ndarray:
         return dirs[name][v]
 
     # ---- B1: digit products ----------------------------------------------
-    st = Stage(model, tok, fit, b1, fit_lines, y)
+    st = Stage(model, tok, fit, b1, fit_lines, y, neg)
     fl = readouts(st, OPERANDS, log, "B1")
     nn = Neurons()
     families = [
@@ -502,7 +662,7 @@ def main() -> None:
     check("B1")
 
     # ---- B2: tens digit and the carries ----------------------------------
-    st = Stage(model, tok, fit, b2, fit_lines, y)
+    st = Stage(model, tok, fit, b2, fit_lines, y, neg)
     names2 = ["P1u", "P1t", "P2u", "P2t", "U"]
     fl = readouts(st, names2, log, "B2")
     nn = Neurons()
@@ -523,7 +683,7 @@ def main() -> None:
     check("B2")
 
     # ---- B3: hundreds digit ----------------------------------------------
-    st = Stage(model, tok, fit, b3, fit_lines, y)
+    st = Stage(model, tok, fit, b3, fit_lines, y, neg)
     names3 = ["k", "K", "Xu"]
     fl = readouts(st, names3, log, "B3")
     nn = Neurons()
@@ -543,7 +703,7 @@ def main() -> None:
     # ---- relay: read t and h, write them fresh into new directions -------
     names4 = ["t", "h"]
     if a.relay >= 0:
-        st = Stage(model, tok, fit, a.relay, fit_lines, y)
+        st = Stage(model, tok, fit, a.relay, fit_lines, y, neg)
         fl = readouts(st, names4, log, "relay")
         nn = Neurons()
         for name in names4:
@@ -553,11 +713,12 @@ def main() -> None:
             erase(nn, st, fl[name], dirs[name])
         kr = nn.insert(s, a.relay)
         print(f"relay block {a.relay}: {kr} neurons", flush=True)
+        check("relay")
         y["t2"], y["h2"] = y["t"], y["h"]
         names4 = ["t2", "h2"]
 
     # ---- B4: write the digits --------------------------------------------
-    st = Stage(model, tok, fit, b4, fit_lines, y)
+    st = Stage(model, tok, fit, b4, fit_lines, y, neg)
     fl = readouts(st, names4, log, "B4")
     push = digit_push(model, tok, a.margin) * final_rms(model, tok, fit[:200])
     nn = Neurons()
@@ -569,6 +730,7 @@ def main() -> None:
     nn.clamp(st.and_gate([st.ctx]), st.const, -dirs["ctx"][0], st.const)
     k4 = nn.insert(s, b4)
     print(f"B4 block {b4}: {k4} neurons", flush=True)
+    check("B4")
 
     edit_all, edit_digits = score(model, tok, [tuple(x) for x in test])
     log["edit"] = {
@@ -580,10 +742,46 @@ def main() -> None:
     nll = text_nll(model, tok, texts)
     if a.gen:
         seen = {tuple(x) for x in fit} | {tuple(x) for x in test}
-        qa = [(f"What is {x} * {z}?", x * z) for x, z in mul2x2(a.gen, 4, exclude=seen)]
+        pairs = mul2x2(a.gen, a.gen_seed, exclude=seen)
+        qa = [(f"What is {x} * {z}?", x * z) for x, z in pairs]
         edit_items = generate(model, tok, qa)
+    if a.side:
+        edit_side = side_sets(model, tok)
     s.restore()
     nll0 = text_nll(model, tok, texts)
+    if a.side:
+        base_side = side_sets(model, tok)
+        log["side"] = {}
+        for name in base_side:
+            if name == "reply":
+                same = sum(
+                    x == z
+                    for x, z in zip(base_side[name], edit_side[name], strict=True)
+                )
+                log["side"][name] = {
+                    "same": same,
+                    "of": len(base_side[name]),
+                    "base": base_side[name],
+                    "edit": edit_side[name],
+                }
+                print(f"side reply: same {same} of {len(base_side[name])}", flush=True)
+                continue
+            r0, r1 = base_side[name], edit_side[name]
+            g = sum(b == 0 and e == 1 for b, e in zip(r0, r1, strict=True))
+            lo = sum(b == 1 and e == 0 for b, e in zip(r0, r1, strict=True))
+            log["side"][name] = {
+                "base": sum(r0),
+                "edit": sum(r1),
+                "gained": g,
+                "lost": lo,
+                "p": sign_p(g, lo),
+                "of": len(r0),
+            }
+            print(
+                f"side {name}: base {sum(r0)} edit {sum(r1)} of {len(r0)} "
+                f"(+{g} / -{lo}, p {sign_p(g, lo):.2g})",
+                flush=True,
+            )
     if a.gen:
         base_items = generate(model, tok, qa)
         r0 = [int(i.correct) for i in base_items]
@@ -601,8 +799,9 @@ def main() -> None:
             "base_x_form": form,
             "base_right": r0,
             "edit_right": r1,
-            "edit_outputs": [i.output for i in edit_items[:20]],
-            "base_outputs": [i.output for i in base_items[:20]],
+            "pairs": [list(x) for x in pairs],
+            "edit_outputs": [i.output for i in edit_items],
+            "base_outputs": [i.output for i in base_items],
         }
         print(
             f"generation (direct, {len(qa)} new products): base {sum(r0)} edit "

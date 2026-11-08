@@ -1037,7 +1037,7 @@ turned back to our own neuron surgery. What they measured:
   becomes the top token at 0.98 to 1.00 of the target states and at none of
   the X + Y states. It was not run in generation.
 
-## 27. Hand-written neurons compute the carry of two-digit products (`opprobe.py`, `carrycollect.py`, `carrybuild.py`, `runs/opprobe_mul2x2.log`, `runs/carrybuild13gen.log`)
+## 27. Hand-written neurons compute the carry of two-digit products (`opprobe.py`, `carrycollect.py`, `carrybuild.py`, `runs/opprobe_mul2x2.log`, `runs/carrybuild13gen.log`, `runs/carryverify*.log`)
 
 No training. New MLP neurons, with weights written from fixed arithmetic,
 compute the hundreds and tens digit of A * B and write them into the logits.
@@ -1067,7 +1067,40 @@ compute the hundreds and tens digit of A * B and write them into the logits.
   - A sum of flags separates an AND of two or three flags, not of four.
   - Flags fade over blocks: stages in consecutive blocks, a relay, and
     erasing flags after their last read.
-- Not yet checked: a second new set, the lost cases, other tasks and chat.
+- Verification (`runs/carryverify4_s5.log`, `runs/carryverify5.log`):
+  - Second new generation set (seed 5, 1000 products): 652 to 865 right,
+    258 gained / 45 lost, p = 1.8e-37. Teacher forced: all four digits
+    0.685 to 0.881 (hundreds 0.961, tens 0.941).
+  - Other tasks, paired: hard set plain 537 to 534 of 600 (p = 0.63), three
+    numbers 294 to 293 of 300, big subtraction 278 to 277 of 300. Story loss
+    2.4432 to 2.4447.
+  - Lost cases (first check): most are a wrong hundreds or tens digit from
+    the circuit; about 10 are format or length changes.
+  - Fixes found on the way: negatives from chat replies and other math
+    replies in the context fit (the first build lost 212 of 600 on the hard
+    set); a digit push of least norm that keeps the separator tokens (" ",
+    ",", ".", newlines, "**") unchanged; the context flag written alone one
+    block earlier (block 15), so that the operand flags of block 16 read a
+    clean flag.
+- Chat drift, measured right:
+  - "Same greedy reply of 30" is not a measure of leakage. A constant push of
+    norm 0.05 in a random direction at block 15 gives 14/30; appending
+    neurons that write exactly 0 gives 30/30. Greedy decoding turns any small
+    change into a different reply.
+  - Teacher forced on the 30 base replies (2060 tokens), top-1 agreement and
+    reply loss: random push 0.05 gives 0.989 / 0.3925 (base 0.3922); the
+    context flag alone 0.990 / 0.3921; the whole circuit 0.974 / 0.3990.
+    Almost all of the drift comes from the operand flags of block 16.
+  - Cause: the operand-digit readouts are unbounded outside the context, and
+    the context readout at block 16 is -0.19 to 0.20 on chat, so the flags
+    write a norm of 2.5 on average (up to 13) on chat positions.
+  - Tried and rejected: the context also in the gate (z minus M where the
+    context flag is 0). Chat agreement 0.992 (noise level), but the flags
+    also die in the context (the context readout is about 0.93 there, and M
+    is large): teacher forced 0.506, generation 652 to 496
+    (`runs/carryverify6_s5.log`). Kept the version above.
+- Open: the remaining chat drift (1.5 points of top-1 agreement), a GSM8K
+  check with the circuit, generation in plain mode, the thousands digit.
 
 ## Observations
 
