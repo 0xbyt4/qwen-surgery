@@ -598,6 +598,11 @@ Blocks (0 to 19 all score between -0.04 and 0.01):
   22 head 14 x0.5/1.25/1.5/2 0.621/0.633/0.584/0.426; block 25 head 15
   0.567/0.570/0.507/0.423; block 26 head 6 0.593/0.642/0.621/0.559. The model
   sits at a good point for these scales.
+- Block 20 head 8, the only one that looks at the tens digits: x1.25, x1.5
+  and x2 give 0.658, 0.658 and 0.651 (+0.009 at most, within noise), x0.5
+  gives 0.598: it is needed, but more of it does not help. Head 6 x1.25 gives
+  0.588 and x0.5 0.595. The edit "the other 9 heads of block 20 off", which
+  lifts sums of four numbers most (section 10), gives 0.575 (-0.074).
 - Look-ahead: a probe (as in section 15) reads a later digit at an earlier
   answer position. At the position that writes the thousands digit, the
   hundreds digit is readable 0.54 (block 25) to 0.59 (block 27); the tens
