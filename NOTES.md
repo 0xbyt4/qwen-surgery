@@ -982,7 +982,7 @@ Read from the saved files and checked; the runs did not finish.
 - Steering vectors (`runs/agent_steerbake/screen.log`): only a first
   screen of how often replies start with "To"; no accuracy yet.
 
-## 25. ExPO: weights from the instruct-base difference (agent run, provisional; `runs/agent_expo/`)
+## 25. ExPO: weights from the instruct-base difference (agent run; `runs/agent_expo/`)
 
 New weights theta = theta_I + alpha * (theta_I - theta_B), with theta_B from
 Qwen3-0.6B-Base (downloaded with approval, `models/Qwen3-0.6B-Base`; same
@@ -1008,8 +1008,12 @@ the small singular values of each delta matrix are shrunk (lam 0.5).
 - The gain of Timber +0.2 is almost all in word2 (51 to 72; well-posed 43
   to 58 of 76). It is the first edit with computed (not scaled) weights
   that passes a paired test on new questions, but three variants were
-  tested on seed 8 and word2 is a flawed template (section 18). GSM8K is
-  the deciding test (running).
+  tested on seed 8 and word2 is a flawed template (section 18).
+- GSM8K, first 400 questions, plain prompt, paired against base (225, 7
+  cut): alpha +0.2 gets 218 (38 / 45, p = 0.51); Timber lam 0.5, alpha +0.2
+  gets 205 (29 / 49, p = 0.031). The Timber variant is significantly worse
+  on GSM8K. Its hard-set gain is narrow (the word2 template) and is not a
+  math gain. Rejected.
 - alpha < 0 helps the teacher-forced products but hurts generation
   (sub_big 95 to 79, longer replies). The "To" row adds nothing with the
   plain prompt, as in section 23, and does not stack with ExPO either
