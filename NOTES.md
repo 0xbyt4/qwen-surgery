@@ -694,6 +694,58 @@ them: -1.887 and -3.112 in all three "none"/"To" rows.)
   lowered the arithmetic itself (products, section 15). The one-row edit
   gets more of the style gain without the arithmetic loss.
 
+## 18. Word problems: a rounding choice, and the row of " down" (`wordcheck.py`, `runs/wordcheck_s6.json`, `runs/outrow2_s3.json`)
+
+The hard-set word problem: buy A packs of B, give away C, split the rest
+into D bags "with any extra kept aside"; the answer is the whole part of
+(A * B - C) / D. 300 questions per seed (`wordcheck.word2`).
+
+- A flaw in the test set: when A * B <= C, the set expects 0. These
+  questions are ill-posed (27% on seed 5, 24% on seed 6). They are counted
+  apart below ("well-posed").
+- The "To" edit of section 17 does not help here: the replies start with
+  the name in the question ("Sam", "Leo"), and they are already step by
+  step (seed 5: 189 of 300, with the edit 184).
+- Where the errors are (seed 5, base, well-posed): exact shares 74 of 74
+  right; shares with a remainder 91 of 156. The wrong ones round to the
+  nearest whole number ("23 / 6 = 3.83..., we round to the nearest whole
+  number: 4") or give a decimal or fraction (2.5, 1.2, 1/6).
+- "round to the nearest" occurs in 76 replies (38 wrong; the other 38 are
+  right only because the fraction is below 0.5), "round down" in 18 (all
+  right). The choice is the token after " round": " to" or " down". There
+  the logit of " to" is above that of " down" by 0.52 (median of 94; 90th
+  percentile 1.83), a ratio of 1.025 (90th percentile 1.092).
+- Edit: the output row of " down" (id 1495), as in section 17.
+
+| Edit | seed 5 well-posed (220) | seed 5 all (300) | story loss |
+|---|---|---|---|
+| none | 163 | 189 | 2.4606 |
+| " down" x1.05 | 183 | 210 | 2.4608 |
+| " down" x1.1 | 194 | 223 | 2.4617 |
+| " down" x1.15 | 199 | 228 | 2.4638 |
+| "To" x1.25 + " down" x1.1 | 190 | 218 | 2.4633 |
+
+- New seed (6, chosen after the factor): base 179 of 227 well-posed (209 of
+  300), " down" x1.1 208 (238), with "To" x1.25 207 (242); a second base run
+  gave 179 again. +13 points on well-posed questions.
+- Counter-sets, where rounding to the nearest is right (fraction 0.5 or
+  more; 100 each: "X.YZ rounded to the nearest whole number", "divide A by
+  B and round to the nearest whole number", "km per day to the nearest
+  km"): 93, 93 and 99 for the base model and the same for " down" x1.1 and
+  x1.15. When the question asks for the nearest number, the model still
+  rounds to the nearest. The edit only moves the choice where the question
+  leaves it to the model.
+- Hard set, seed 3 (`editcheck.py`, 768 tokens): " down" x1.1 91 of 120
+  (word2 14 to 15; the set has only 20 word problems, about a quarter of
+  them ill-posed), story loss 2.4617. Both rows ("To" x1.25 + " down" x1.1):
+  106 of 120 (base 90, "To" alone 105), story loss 2.4633.
+- General prompts (25, now with "the opposite of up", "how do I calm down",
+  "should I write my ideas down", "when the stock market goes down"): 24
+  replies are the same token for token with both rows; the one that changed
+  is the Celsius reply of section 17.
+- Saved as `models/Qwen3-0.6B-to125-down110` (both rows; git-ignored). From
+  disk: word2 seed 6 207 of 227 well-posed, 242 of 300, as in memory.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -760,6 +812,12 @@ Items marked "estimate" or "idea" are not measured.
   token "To", x1.25) raises the hard set from 90 to 105 of 120 on new
   questions, with almost no cost on stories (+0.0015) and 19 of 20 general
   replies unchanged (section 17).
+- Single choices in the reply decide many errors, and a small change in
+  one output row can move them: " down" x1.1 after " round" lifts word
+  problems with a remainder by 13 points on new questions, and leaves
+  questions that ask for the nearest number alone (section 18). The method:
+  find the token where right and wrong replies split, measure the logit
+  gap there, and scale that token's row just enough.
 - An edit can look like a skill gain and be a style change: check the
   replies, not only the score (section 17 against section 10).
 - Steering needs a larger push than the class mean: at alpha 1 block 25
