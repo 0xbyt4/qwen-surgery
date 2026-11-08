@@ -291,6 +291,43 @@ difference 0.03 at a scale of 11.75).
   position that writes the next digit. The later MLPs (blocks 21 and 22) are
   candidates for the digit arithmetic itself; this is not yet tested.
 
+## 10. Scaling the math heads up (`editcheck.py`, `runs/scale_dev_*.json`, `runs/scale_test_s3.json`, `runs/scale_test_s4.json`)
+
+An edit `head:L:H1,...*F` multiplies the o_proj columns of those heads by F.
+Seed 2 was used to choose the edits; seeds 3 and 4 are new questions. Hard
+set: correct of 120 per seed (sums of four numbers in brackets, of 20).
+
+| Edit | Seed 2 (dev) | Seed 3 | Seed 4 | Total of 360 | Story loss |
+|---|---|---|---|---|---|
+| none | 94 [11] | 90 [11] | 84 [11] | 268 | 2.4606 |
+| heads 12-15 x1.5 | 97 [15] | 99 [15] | 88 [15] | 284 | 2.4665 |
+| heads 7, 8, 12-15 x1.5 | 98 [15] | 99 [18] | 87 [16] | 284 | 2.4686 |
+| the other 9 heads off | 99 [19] | 94 [16] | 92 [19] | 285 | 2.4950 |
+| control: heads 0, 3, 5, 10 x1.5 | | 91 [10] | 85 [11] | (176 of 240; base 174) | 2.4664 |
+| control: heads 1, 2, 4, 6, 9, 11 x1.5 | | 85 [9] | 90 [12] | (175 of 240; base 174) | 2.4718 |
+| control: block 17 heads 0, 3, 5, 10 x1.5 | | 87 [10] | 81 [12] | (168 of 240; base 174) | 2.4626 |
+
+Other scales on seed 2: heads 12-15 x1.25 92, x2 92, x3 60; heads 7, 8,
+12-15 x2 95. The top 16 or 64 neurons of block 20 scaled by 1.5, 2 or 3 gave
+78 to 94 (no gain), although the easy-set logprob got better (math20 -1.89
+to -1.58 for the top 16 x1.5).
+
+- Heads 12 to 15 of block 20 x1.5 give +16 of 360 hard questions (+4.4
+  points), with +9 and +4 on the two new seeds. The same scale on other heads
+  gives +2, +1 and -6 on the new seeds.
+- The gain is clearest on sums of four numbers: from 11/20 to 15 to 19 in
+  every set and every math-head edit, while the controls stay at 9 to 12.
+  These sums need the most digits fetched at once.
+- The price on general text is small but not zero: the story loss rises by
+  0.006 (heads 12-15 x1.5), about as much as for the control scalings.
+  Zeroing the other 9 heads gives the same math gain at 5 to 6 times that
+  price (+0.034).
+- Too much scaling breaks the model: x3 drops to 60/120.
+- Each set has only 120 questions and greedy replies are sensitive to small
+  changes, so a single-set difference of 3 to 6 is within noise (a control
+  edit moved one set by +6). The claim rests on the three sets together and
+  on the sums of four numbers.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -320,6 +357,12 @@ Items marked "estimate" or "idea" are not measured.
   for the "bottom" neurons of block 21 it has the wrong sign (section 6).
 - Math in block 20 attention sits in a few heads: heads 12 to 15 (key-value
   heads 6 and 7) are needed for math and not for stories (section 5).
+- Writing a weight can improve a skill without training: heads 12 to 15 of
+  block 20 scaled by 1.5 lift the hard math set by 4.4 points over three
+  sets, mostly on sums of four numbers (section 10). Scaling the math neurons
+  of block 20 did not help, although it raised the answer logprob on the
+  easy set: a better logprob on easy questions does not mean better answers
+  on hard ones.
 - Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
   operand digit by place value for the digit being written (section 9).
 - bf16 is a noise source for the measurements: batch and serial runs give
