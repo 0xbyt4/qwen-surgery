@@ -258,6 +258,39 @@ Same method as section 4 (serial runs):
 - Results before this section come from serial runs; compare runs only within
   one mode.
 
+## 8. Hard math set (`mathgen.hard_questions`, `editcheck.py`)
+
+- Six kinds, 20 of each in 120 questions: 3-digit times 2-digit products,
+  sums of four 3-digit numbers, two-step word problems, equations with x on
+  both sides, mixed expressions, 5-digit minus 4-digit.
+- Base, thinking off, batch, up to 512 tokens, seed 2: 94/120 (products 7,
+  sums of four 11, word problems 17, equations 20, mixed 20, subtraction 19);
+  2 replies cut at 512 tokens. Mean answer logprob -6.24.
+- Edits are chosen on seed 2 ("dev") and confirmed on seeds 3 and 4.
+
+## 9. What the block 20 math heads look at (`attnlook.py`, `runs/attnlook20.log`)
+
+The attention weights are computed again from the block input. The output
+built from them matches the module output within bf16 rounding (max
+difference 0.03 at a scale of 11.75).
+
+- While the model writes an answer digit, heads 12 to 15 and head 8 look at
+  the digits of the question: 56%, 81%, 70%, 50% and 73% of their attention
+  over the 43 answer-digit positions of math20. Heads 0, 3 and 7 look almost
+  only at the first token (`<|im_start|>`) or at the answer lead.
+- The heads pick digits by place value. "47 + 38 = 85":
+  - for the first digit "8": head 14 takes "4" (tens of 47), head 8 takes "3"
+    (tens of 38), heads 15 and 12 take "7" and "8" (the units, which decide
+    the carry);
+  - for the second digit "5": heads 13 and 14 take "7", head 8 takes "8" (the
+    two units digits; 7 + 8 ends in 5).
+- "125 - 68 = 57": for the "7", heads 13 and 14 take "5" and head 8 takes
+  "8" (units, with a borrow). For the "5", head 15 takes "5", heads 13 and 14
+  take "2", head 8 takes "6", head 12 takes "8".
+- So these heads route the operand digits of the right column to the
+  position that writes the next digit. The later MLPs (blocks 21 and 22) are
+  candidates for the digit arithmetic itself; this is not yet tested.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -287,6 +320,8 @@ Items marked "estimate" or "idea" are not measured.
   for the "bottom" neurons of block 21 it has the wrong sign (section 6).
 - Math in block 20 attention sits in a few heads: heads 12 to 15 (key-value
   heads 6 and 7) are needed for math and not for stories (section 5).
+- Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
+  operand digit by place value for the digit being written (section 9).
 - bf16 is a noise source for the measurements: batch and serial runs give
   different greedy replies at near ties, and single-question logprobs differ
   by up to 0.4 (section 7).
@@ -304,7 +339,10 @@ Items marked "estimate" or "idea" are not measured.
   weight read per step now serves all questions. A sweep of 57 runs drops
   from about 6 minutes to about 1 minute (estimate from the per-run times).
 - Parallel processes work (each needs about 1.3 GB), but they slow each
-  other. Speed numbers must come from runs alone, with alternating order: in
+  other. A batch of 120 questions with up to 512 new tokens holds a large KV
+  cache (about 8 GB by estimate: 120 x 600 positions x 28 blocks x 8 heads x
+  128 x 2 x 2 bytes); two such processes at once failed with a Metal
+  out-of-memory error. Run large batches one at a time, or split them. Speed numbers must come from runs alone, with alternating order: in
   the first sweep the base run (first in the process) showed 190 tok/s and
   later runs 212 tok/s, which is too large a difference for one block.
 - The patches in our MLX fork (`mlx-tiny-train`) target head dim 32 and small
