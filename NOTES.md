@@ -874,6 +874,40 @@ and what was done:
 - Not yet tested: " down" on questions that need rounding up ("how many
   bags are needed"); more than one template per question kind.
 
+## 21. Row scaling against an additive logit bias (agent run, `runs/agent_bias/`)
+
+Is "To" x1.25 the same as a sampling-time logit bias (logit + b, as many
+APIs allow)? Base model, seed 3 tradeoff sets, greedy, 768 tokens. The bias
+was put into the model as an output-head bias that is +b at id 1249 only.
+
+- The "To" logit (float32, teacher forced): at the first reply position it
+  is large and positive (mean 23.9 on hard questions, 17.2 on chat), so
+  x1.25 adds about +6 there. In the middle of replies its median is near 0
+  (-0.10 math, 0.23 chat; positive in about half of the positions), so
+  x1.25 adds about +0.24 on average and lowers "To" where the logit is
+  negative. The row edit gates itself; a bias adds the same b everywhere.
+
+| Edit | add4 | mul2x2 | mul3x2 | of 700 | math tokens | chat same of 30 | chat shared start |
+|---|---|---|---|---|---|---|---|
+| none | 115 | 196 | 58 | 369 | 57.3 | 30 | 72.1 |
+| "To" x1.25 | 190 | 220 | 170 | 580 | 108.1 | 23 | 57.5 |
+| bias +4 | 190 | 206 | 111 | 507 | 76.3 | 25 | 59.4 |
+| bias +6 | 190 | 217 | 171 | 578 | 112.3 | 20 | 51.1 |
+| bias +8 | 190 | 219 | 174 | 583 | 119.8 | 10 | 33.0 |
+
+- On math, bias +6 (the mean extra logit of x1.25 at the reply start)
+  matches x1.25 (single greedy run; differences of about 3 per set are
+  noise). On chat, x1.25 is better: bias +6 changes 10 replies, x1.25 7.
+  With +8 the model puts "To" in the middle of replies ("To shore, to
+  shore", "**Toaster**").
+- Practical: where weights cannot be changed (an API, llama.cpp
+  `--logit-bias`), a bias of about +5 to +6 on "To" gives the math gain,
+  with somewhat more drift in chat. The row edit is the better form when
+  the weights can be written.
+- The first-position argmax counts predict how many replies start with
+  "To" (223 predicted, 213 measured on mul2x2), so a factor can be chosen
+  from one forward pass, without a generation sweep (not yet used).
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
