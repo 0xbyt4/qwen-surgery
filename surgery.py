@@ -6,6 +6,10 @@ nothing from that head or neuron to the residual stream. The other parts of
 the forward pass (and the KV cache) do not change. Scaling the same columns
 by a factor other than 0 makes the part write more (or less) into the
 residual stream.
+
+The output head is tied to the input embedding. To change the output score
+of a token alone, scale_output_rows first unties it: the model gets its own
+lm_head (a copy of the embedding), and only that copy is changed.
 """
 
 import json
@@ -19,6 +23,7 @@ class Surgeon:
     def __init__(self, model: nn.Module) -> None:
         self.model = model
         self.saved: dict[tuple[int, str], mx.array] = {}
+        self.untied = False
         attn = model.model.layers[0].self_attn
         self.n_heads = attn.n_heads
         self.head_dim = attn.o_proj.weight.shape[1] // self.n_heads
@@ -60,10 +65,29 @@ class Surgeon:
     def zero_mlp(self, layer: int) -> None:
         self.zero_neurons(layer, list(range(self.n_neurons)))
 
+    def scale_output_rows(self, token_ids: list[int], factor: float) -> None:
+        """Multiply the output-head rows of these tokens by factor (their
+        logits scale by the same factor); the input embedding stays."""
+        if not self.untied and self.model.args.tie_word_embeddings:
+            emb = self.model.model.embed_tokens.weight
+            head = nn.Linear(emb.shape[1], emb.shape[0], bias=False)
+            head.weight = emb
+            self.model.lm_head = head
+            self.model.args.tie_word_embeddings = False
+            self.untied = True
+        head = self.model.lm_head
+        scale = mx.ones(head.weight.shape[0], dtype=mx.float32)
+        scale[mx.array(token_ids)] = factor
+        head.weight = (head.weight * scale[:, None]).astype(head.weight.dtype)
+
     def restore(self) -> None:
         for (layer, name), w in self.saved.items():
             self._linear(layer, name).weight = w
         self.saved.clear()
+        if self.untied:
+            del self.model.lm_head
+            self.model.args.tie_word_embeddings = True
+            self.untied = False
 
 
 def apply_spec(s: Surgeon, spec: str) -> None:
@@ -74,6 +98,7 @@ def apply_spec(s: Surgeon, spec: str) -> None:
     neurons:L:J1,J2,...          zero MLP neurons of block L
     nfile:PATH:KEY               zero the neurons of results[KEY] in a
                                  neurons.py output file
+    out:T1,T2,...*F              scale the output-head rows of token ids
     A head, neurons or nfile edit ending in "*F" scales the parts by F
     instead of zeroing them, for example head:20:12,13*2.
     """
@@ -92,6 +117,8 @@ def _apply_one(s: Surgeon, spec: str) -> None:
     elif kind == "block":
         s.zero_attention(int(rest[0]))
         s.zero_mlp(int(rest[0]))
+    elif kind == "out":
+        s.scale_output_rows([int(x) for x in rest[0].split(",")], factor)
     elif kind == "head":
         s.scale_heads(int(rest[0]), [int(x) for x in rest[1].split(",")], factor)
     elif kind == "neurons":
