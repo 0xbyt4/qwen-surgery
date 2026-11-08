@@ -1012,7 +1012,8 @@ the small singular values of each delta matrix are shrunk (lam 0.5).
   the deciding test (running).
 - alpha < 0 helps the teacher-forced products but hurts generation
   (sub_big 95 to 79, longer replies). The "To" row adds nothing with the
-  plain prompt, as in section 23.
+  plain prompt, as in section 23, and does not stack with ExPO either
+  (alpha +0.2 with "To" x1.25: 539, against 541 without).
 
 ## Observations
 
