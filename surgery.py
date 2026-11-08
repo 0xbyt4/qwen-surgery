@@ -23,6 +23,7 @@ class Surgeon:
     def __init__(self, model: nn.Module) -> None:
         self.model = model
         self.saved: dict[tuple[int, str], mx.array] = {}
+        self.saved_inputs: dict[int, tuple[mx.array, mx.array]] = {}
         self.untied = False
         attn = model.model.layers[0].self_attn
         self.n_heads = attn.n_heads
@@ -80,10 +81,30 @@ class Surgeon:
         scale[mx.array(token_ids)] = factor
         head.weight = (head.weight * scale[:, None]).astype(head.weight.dtype)
 
+    def add_neurons(
+        self, layer: int, gate: mx.array, up: mx.array, down: mx.array
+    ) -> None:
+        """Append k new neurons to the MLP of a block. gate and up are
+        [k, d] (the input rows), down is [d, k] (the output columns): neuron
+        j adds silu(gate[j] . x) * (up[j] . x) * down[:, j] to the residual."""
+        mlp = self.model.model.layers[layer].mlp
+        self.saved.setdefault((layer, "down_proj"), mlp.down_proj.weight)
+        self.saved_inputs.setdefault(layer, (mlp.gate_proj.weight, mlp.up_proj.weight))
+        dt = mlp.down_proj.weight.dtype
+        mlp.gate_proj.weight = mx.concatenate([mlp.gate_proj.weight, gate.astype(dt)])
+        mlp.up_proj.weight = mx.concatenate([mlp.up_proj.weight, up.astype(dt)])
+        mlp.down_proj.weight = mx.concatenate(
+            [mlp.down_proj.weight, down.astype(dt)], axis=1
+        )
+
     def restore(self) -> None:
         for (layer, name), w in self.saved.items():
             self._linear(layer, name).weight = w
         self.saved.clear()
+        for layer, (gate, up) in self.saved_inputs.items():
+            mlp = self.model.model.layers[layer].mlp
+            mlp.gate_proj.weight, mlp.up_proj.weight = gate, up
+        self.saved_inputs.clear()
         if self.untied:
             del self.model.lm_head
             self.model.args.tie_word_embeddings = True

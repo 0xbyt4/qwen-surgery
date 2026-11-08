@@ -1037,6 +1037,38 @@ turned back to our own neuron surgery. What they measured:
   becomes the top token at 0.98 to 1.00 of the target states and at none of
   the X + Y states. It was not run in generation.
 
+## 27. Hand-written neurons compute the carry of two-digit products (`opprobe.py`, `carrycollect.py`, `carrybuild.py`, `runs/opprobe_mul2x2.log`, `runs/carrybuild13gen.log`)
+
+No training. New MLP neurons, with weights written from fixed arithmetic,
+compute the hundreds and tens digit of A * B and write them into the logits.
+
+- The inputs are there, the carry is not (`opprobe.py`; ridge probes, fit
+  on 3000 products, tested on 1000 new ones): at the answer positions the
+  four operand digits are read 99 to 100% after blocks 15 to 20, but the
+  carry into the hundreds digit only 30 to 61%.
+- The circuit (school method, all intermediate values one-hot flags in new
+  residual directions; section text in the `carrybuild.py` docstring):
+  operand flags (block 16), digit products (17), tens digit and carries
+  (18), hundreds digit (19), a relay (21), digit write (23). About 4300 new
+  neurons. The only fitted parts are linear readouts (closed-form ridge).
+- Teacher forced, 1500 new products: all four digits right 0.685 to 0.846
+  (hundreds 0.838 to 0.919, tens 0.807 to 0.949, units 0.997 to 0.991,
+  thousands 0.973 to 0.975). Story loss 2.4432 to 2.4450.
+- Generation (direct prompt, greedy, 1000 new products not in the fit or
+  test set): 666 to 842 right, 219 gained / 43 lost, p = 1.4e-29.
+- What made it work (each found by a failed build, `runs/carrybuild*.log`):
+  - Directions: flags in directions of low model variance still broke the
+    model; directions that the later blocks read and write least did not.
+  - The constant in a gate must be a readout of 1, not a number added to
+    every weight (a bug that broke builds 3 to 6).
+  - A context flag (fit against every other position of the product
+    sequences and of stories) keeps the neurons silent elsewhere; flag
+    readouts are fit to 0 outside the context.
+  - A sum of flags separates an AND of two or three flags, not of four.
+  - Flags fade over blocks: stages in consecutive blocks, a relay, and
+    erasing flags after their last read.
+- Not yet checked: a second new set, the lost cases, other tasks and chat.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.

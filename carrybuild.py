@@ -1,0 +1,619 @@
+"""Add hand-written neurons that compute the hundreds and tens digit of A * B.
+
+No training. The model already holds the four operand digits at the answer
+positions (opprobe.py: read 99-100% after blocks 15 to 20), but not the
+carry. New MLP neurons compute the digits with the school method, and every
+value between the steps is a one-hot flag (0 or 1) in its own new residual
+direction, so errors do not add up from step to step:
+
+  A = 10 a_t + a_u, B = 10 b_t + b_u
+  P1 = a_t b_u, P2 = a_u b_t, U = (a_u b_u) // 10, X = a_t b_t
+  S2 = P1 % 10 + P2 % 10 + U        tens digit t = S2 % 10, k = S2 // 10
+  K = P1 // 10 + P2 // 10           hundreds digit h = (X % 10 + K + k) % 10
+
+Stages (each is new neurons in the MLP of one block):
+  B0 (block 16): flags of a_t, a_u, b_t, b_u (40 flags) and a context flag
+            (1 only at the hundreds and tens answer positions). A linear
+            readout of the model state always ranks the right digit first,
+            but one threshold for all values does not separate it; one
+            threshold per value does.
+  B1 (block 17): one AND neuron pair per digit pair (a_t = i, b_u = j)
+            writes the flags of P1 % 10 and P1 // 10, and so on for P2, U
+            and X % 10.
+  B2 (block 18): AND over (P1 % 10, P2 % 10, U) writes the flags of t and k;
+            AND over (P1 // 10, P2 // 10) writes the flags of K.
+  B3 (block 19): AND over (X % 10, K, k) writes the flag of h.
+  relay (block 21): reads t and h and writes them again, fresh, into new
+            directions (a flag fades over several blocks).
+  B4 (block 23): t at the tens position and h at the hundreds position add
+            the logit direction of that digit.
+Each stage erases the flags it read for the last time. Flags sit in
+residual directions that the later blocks read and write least.
+
+A neuron is SwiGLU: silu(gate . n) * (up . n) * down, with n the normed MLP
+input. A clamp to [0, 1] uses two neurons: (silu(beta z) - silu(beta z - S))
+/ S. An AND of m flags is a clamp on (sum of flags) - (m - 0.5).
+
+The only fitted parts are linear readouts (closed-form ridge, no gradient)
+of what the model or the new neurons hold: the operand digits, the flags, a
+constant, the context (product answer position against story text) and the
+answer position. Fits use the fit products (seed 2) and stories 0-99; the
+score uses new products (seed 3, none in the fit set) and stories 100-199.
+
+Example:
+    uv run python carrybuild.py --gen 1000
+"""
+
+import argparse
+import itertools
+import json
+import math
+from collections.abc import Callable
+
+import mlx.core as mx
+import numpy as np
+from mlx_lm import load
+
+from carrycollect import mlp_inputs
+from circuit import run_blocks
+from evalmath import DEFAULT_MODEL, ROOT, run
+from mulfix import score
+from probe import WIDTH, mul2x2, reply_ids
+from surgery import Surgeon
+from textcheck import text_nll
+
+HUNDREDS, TENS = 1, 2  # answer positions (0 = thousands digit)
+BETA, S = 50.0, 20.0  # a clamp is 0 for z <= -0.05 and 1 for z >= S / BETA
+OPERANDS = ["a_t", "a_u", "b_t", "b_u"]
+USED_WEIGHT = 10.0  # weight of the hundreds and tens states in flag readouts
+SIZES = {"P1u": 10, "P1t": 9, "P2u": 10, "P2t": 9, "U": 9, "Xu": 10}
+SIZES |= {"t": 10, "k": 3, "K": 17, "h": 10, "t2": 10, "h2": 10, "ctx": 1}
+
+
+def variables(pairs: np.ndarray) -> dict[str, np.ndarray]:
+    a, b = pairs[:, 0], pairs[:, 1]
+    v = {"a_t": a // 10, "a_u": a % 10, "b_t": b // 10, "b_u": b % 10}
+    p1, p2, x = v["a_t"] * v["b_u"], v["a_u"] * v["b_t"], v["a_t"] * v["b_t"]
+    v |= {"P1u": p1 % 10, "P1t": p1 // 10, "P2u": p2 % 10, "P2t": p2 // 10}
+    v |= {"U": (v["a_u"] * v["b_u"]) // 10, "Xu": x % 10}
+    s2 = v["P1u"] + v["P2u"] + v["U"]
+    v |= {"t": s2 % 10, "k": s2 // 10, "K": v["P1t"] + v["P2t"]}
+    v["h"] = (v["Xu"] + v["K"] + v["k"]) % 10
+    if not ((v["t"] == a * b // 10 % 10).all() and (v["h"] == a * b // 100 % 10).all()):
+        raise ValueError("digit formulas are wrong")
+    return v
+
+
+def ridge(
+    x: np.ndarray, y: np.ndarray, lam: float = 1.0, weight: np.ndarray | None = None
+) -> np.ndarray:
+    """Closed-form ridge readout; weight gives each row a weight."""
+    x = x.astype(np.float64)
+    xw = x if weight is None else x * weight[:, None]
+    return np.linalg.solve(xw.T @ x + lam * np.eye(x.shape[1]), xw.T @ y)
+
+
+def product_inputs(model, tok, pairs, block: int, chunk: int = 250) -> np.ndarray:
+    """MLP input of block at the four answer positions: [N, 4, d]."""
+    x, first = reply_ids(tok, [tuple(p) for p in pairs])
+    pos = mx.arange(first - 1, first - 1 + WIDTH)
+    out = []
+    for i in range(0, len(pairs), chunk):
+        n = mlp_inputs(model, x[i : i + chunk], [block])[block]
+        out.append(np.array(n[:, pos].astype(mx.float32)))
+    return np.concatenate(out)
+
+
+def other_inputs(model, tok, pairs, block: int, chunk: int = 100) -> np.ndarray:
+    """MLP input of block at every position of the product sequences except
+    the hundreds and tens answer positions: [M, d]."""
+    x, first = reply_ids(tok, [tuple(p) for p in pairs])
+    keep = [
+        i
+        for i in range(x.shape[1])
+        if i not in (first - 1 + HUNDREDS, first - 1 + TENS)
+    ]
+    out = []
+    for i in range(0, len(pairs), chunk):
+        n = mlp_inputs(model, x[i : i + chunk], [block])[block]
+        out.append(
+            np.array(n[:, mx.array(keep)].astype(mx.float32)).reshape(-1, n.shape[-1])
+        )
+    return np.concatenate(out)
+
+
+def story_inputs(model, tok, block: int, lines: list[str], max_tokens=256):
+    out = []
+    for line in lines:
+        ids = tok.encode(json.loads(line)["text"])[:max_tokens]
+        n = mlp_inputs(model, mx.array([ids]), [block])[block]
+        out.append(np.array(n[0].astype(mx.float32)))
+    return np.concatenate(out)
+
+
+class Neurons:
+    """Rows of new neurons for one block, built in numpy."""
+
+    def __init__(self) -> None:
+        self.gate: list[np.ndarray] = []
+        self.up: list[np.ndarray] = []
+        self.down: list[np.ndarray] = []
+
+    def clamp(self, z, up, out, const) -> None:
+        """Adds out * up(n) * clamp(z(n)); z, up and const (a readout of 1)
+        are readout rows [d]."""
+        self.gate += [BETA * z, BETA * z - S * const]
+        self.up += [up, up]
+        self.down += [out / S, -out / S]
+
+    def insert(self, s: Surgeon, layer: int) -> int:
+        s.add_neurons(
+            layer,
+            mx.array(np.stack(self.gate), dtype=mx.float32),
+            mx.array(np.stack(self.up), dtype=mx.float32),
+            mx.array(np.stack(self.down, axis=1), dtype=mx.float32),
+        )
+        return len(self.gate)
+
+
+class Stage:
+    """Readouts at the MLP input of one block. Value readouts are fit on the
+    hundreds and tens positions of the fit products. The context readout
+    ("ctx": 1 at those positions, 0 at all other positions of the product
+    sequences and of the stories), the position readouts and a constant
+    are fit on all of these states."""
+
+    def __init__(self, model, tok, fit, block, story_lines, y, n_other=400) -> None:
+        n = product_inputs(model, tok, fit, block)
+        other = other_inputs(model, tok, fit[:n_other], block)
+        st = story_inputs(model, tok, block, story_lines)
+        self.used = n[:, [HUNDREDS, TENS]].reshape(-1, n.shape[-1])
+        self.all = np.concatenate([self.used, other, st])
+        is_ctx = np.r_[np.ones(len(self.used)), np.zeros(len(other) + len(st))]
+        self.is_ctx = is_ctx
+        self.const = ridge(self.all, np.ones((len(self.all), 1)))[:, 0]
+        self.ctx = ridge(self.all, is_ctx[:, None])[:, 0]
+        self.ctx /= np.median(self.used @ self.ctx)
+        is_h = np.r_[np.tile([1.0, 0.0], n.shape[0]), np.zeros(len(other) + len(st))]
+        self.pos = {
+            HUNDREDS: ridge(self.all, is_h[:, None])[:, 0],
+            TENS: ridge(self.all, (is_ctx - is_h)[:, None])[:, 0],
+        }
+        self.y = y
+        g = model.model.layers[block].post_attention_layernorm.weight
+        self.g = np.array(g.astype(mx.float32))
+
+    def onehot(
+        self, name: str, size: int, everywhere: bool = True
+    ) -> tuple[np.ndarray, float]:
+        """Readout [d, size] of a variable as one-hot flags, and its largest
+        error on the fit states. With everywhere, the readout is also fit to
+        0 at all other states (for flags the new neurons write, which exist
+        only at the hundreds and tens positions); without it, only the
+        hundreds and tens positions are used (for the model's own state)."""
+        target = np.eye(size)[np.repeat(self.y[name], 2)]
+        if not everywhere:
+            w = ridge(self.used, target)
+            return w, float(np.abs(self.used @ w - target).max())
+        full = np.zeros((len(self.all), size))
+        full[: len(target)] = target
+        weight = np.r_[
+            np.full(len(target), USED_WEIGHT), np.ones(len(self.all) - len(target))
+        ]
+        w = ridge(self.all, full, weight=weight)
+        # scale each value so that its median on the right states is 1
+        sc, yy = self.used @ w, np.repeat(self.y[name], 2)
+        for v in range(size):
+            if (yy == v).any():
+                w[:, v] /= np.median(sc[yy == v, v])
+        return w, float(np.abs(self.all @ w - full).max())
+
+    def and_gate(self, flags: list[np.ndarray]) -> np.ndarray:
+        """Gate of an AND over flag readout rows (in clamp units, where the
+        clamp is 1 above S / BETA). With z = sum - (m - 0.5): 0.5 when all
+        flags are on, -0.5 when one is off."""
+        z = sum(flags) - (len(flags) - 0.5) * self.const
+        # clamp units: 1 for z >= 0.1 (sum >= m - 0.4), 0 for z <= -0.2
+        return 1.5 * z + 0.25 * self.const
+
+
+def quiet_directions(
+    model, first: int, n: np.ndarray, g: np.ndarray, k: int
+) -> np.ndarray:
+    """k unit residual directions that the blocks from first on (and the
+    output head) read and write least, and along which the model state
+    varies little.
+    A direction w is read by a matrix W after a norm with gain g as
+    W (g * w); each matrix counts with weight 1 / |W|^2."""
+    f32 = lambda x: np.array(x.astype(mx.float32), dtype=np.float64)  # noqa: E731
+    read = np.zeros((n.shape[1], n.shape[1]))
+    blocks = model.model.layers
+    for blk in blocks[first:]:
+        att, mlp = blk.self_attn, blk.mlp
+        for norm, mats in [
+            (blk.input_layernorm, [att.q_proj, att.k_proj, att.v_proj]),
+            (blk.post_attention_layernorm, [mlp.gate_proj, mlp.up_proj]),
+        ]:
+            gn = f32(norm.weight)
+            for lin in mats:
+                w = f32(lin.weight) * gn[None, :]
+                read += w.T @ w / (w * w).sum()
+        for lin in [att.o_proj, mlp.down_proj]:  # what the block writes
+            w = f32(lin.weight)
+            read += w @ w.T / (w * w).sum()
+    gn = f32(model.model.norm.weight)
+    head = f32(model.model.embed_tokens.weight) * gn[None, :]
+    read += head.T @ head / (head * head).sum()
+    cov = np.cov((n / g).T)
+    m = read / np.trace(read) + cov / np.trace(cov)
+    _, vec = np.linalg.eigh(m)
+    w = vec[:, :k].T
+    return w / np.linalg.norm(w, axis=1, keepdims=True)
+
+
+def final_rms(model, tok, pairs) -> float:
+    """rms of the last residual (before the final norm) at the answer positions."""
+    x, first = reply_ids(tok, [tuple(p) for p in pairs])
+    _, resid, _ = run_blocks(model, x, keep=True)
+    h = np.array(resid[-1][:, first - 1 : first - 1 + WIDTH].astype(mx.float32))
+    return float(np.sqrt((h**2).mean()))
+
+
+def digit_push(model, tok, margin: float) -> np.ndarray:
+    """[10, d] residual vectors that raise the logit of each digit by about
+    margin against the other digits, through the final norm and the output
+    head, for a residual of rms 1 (multiply by the real rms)."""
+    ids = [tok.encode(str(d), add_special_tokens=False)[0] for d in range(10)]
+    e = np.array(model.model.embed_tokens.weight[mx.array(ids)].astype(mx.float32))
+    g = np.array(model.model.norm.weight.astype(mx.float32))
+    v = g * (e - e.mean(0))
+    return margin * v / (v * v).sum(1, keepdims=True)
+
+
+def lookup(
+    nn: Neurons,
+    st: Stage,
+    inputs: list[tuple[np.ndarray, int]],
+    write: Callable[..., np.ndarray],
+    up: np.ndarray,
+) -> None:
+    """One AND neuron pair per combination of input values; write(*values)
+    gives the output vector of that combination. A single input is ANDed
+    with the context flag; with two or more inputs this is not needed, since
+    the flag readouts are fit to 0 outside the context."""
+    ctx = [st.ctx] if len(inputs) == 1 else []
+    for values in itertools.product(*[range(size) for _, size in inputs]):
+        flags = [r[:, v] for (r, _), v in zip(inputs, values, strict=True)]
+        nn.clamp(st.and_gate([*ctx, *flags]), up, write(*values), st.const)
+
+
+def readouts(st: Stage, names: list[str], log: dict, tag: str) -> dict:
+    out = {}
+    stats = {}
+    for name in names:
+        size = SIZES.get(name, 10)
+        out[name], err = st.onehot(name, size)
+        log["readout_max_err"][f"{tag} {name}"] = err
+        sc, yy = st.used @ out[name], np.repeat(st.y[name], 2)
+        right = sc[np.arange(len(sc)), yy]
+        wrong = np.where(np.eye(size)[yy] == 1, -9.0, sc).max(1)
+        rest = st.all[len(st.used) :] @ out[name]
+        stats[name] = (
+            round(float(np.percentile(right, 0.5)), 2),
+            round(float(np.percentile(wrong, 99.5)), 2),
+            round(float(np.abs(rest).max()), 2),
+        )
+    ctx_in = st.used @ st.ctx
+    ctx_out = st.all[len(st.used) :] @ st.ctx
+    stats["ctx"] = (
+        round(float(np.percentile(ctx_in, 0.5)), 2),
+        round(float(np.percentile(ctx_out, 99.9)), 2),
+    )
+    log.setdefault("readout_stats", {})[tag] = stats
+    print(
+        f"{tag} in-context right p0.5 / wrong p99.5 / |other| max:", stats, flush=True
+    )
+    print(
+        f"{tag} readout max err",
+        {n: round(log["readout_max_err"][f"{tag} {n}"], 3) for n in names},
+        flush=True,
+    )
+    return out
+
+
+def erase(nn: Neurons, st: Stage, flags: np.ndarray, out: np.ndarray) -> None:
+    """Remove flags after their last read: a clamp on each flag adds -out[v]."""
+    for v in range(flags.shape[1]):
+        nn.clamp(st.and_gate([st.ctx, flags[:, v]]), st.const, -out[v], st.const)
+
+
+def debug_neurons(model, tok, nn: Neurons, block: int, lines: list[str]) -> None:
+    """Output size of new neurons at story positions, in float32 numpy and in
+    bf16 on the GPU (before they are inserted)."""
+    n = story_inputs(model, tok, block, lines)
+    gate, up, down = np.stack(nn.gate), np.stack(nn.up), np.stack(nn.down, axis=1)
+    g = n @ gate.T
+    act = g / (1 + np.exp(-np.clip(g, -60, 60))) * (n @ up.T)
+    f32 = np.linalg.norm(act @ down.T, axis=1)
+    bf = lambda x: mx.array(x).astype(mx.bfloat16)  # noqa: E731
+    nb = bf(n)
+    gb, ub = nb @ bf(gate).T, nb @ bf(up).T
+    ob = (nn_silu(gb) * ub) @ bf(down).T
+    b16 = np.linalg.norm(np.array(ob.astype(mx.float32)), axis=1)
+    print(
+        f"debug block {block}: |gate| max {np.abs(g).max():.1f}; "
+        f"output norm f32 p50/p99/max {np.percentile(f32, 50):.3f}/"
+        f"{np.percentile(f32, 99):.3f}/{f32.max():.3f}; bf16 p50/p99/max "
+        f"{np.percentile(b16, 50):.3f}/{np.percentile(b16, 99):.3f}/{b16.max():.3f}; "
+        f"input norm {np.linalg.norm(n, axis=1).mean():.1f}",
+        flush=True,
+    )
+
+
+def nn_silu(x: mx.array) -> mx.array:
+    return x * mx.sigmoid(x)
+
+
+def generate(model, tok, qa: list[tuple[str, int]], batch: int = 100) -> list:
+    """Greedy replies in the direct mode (evalmath.run), in batches."""
+    out = []
+    for i in range(0, len(qa), batch):
+        out += run(model, tok, "direct", 64, qa[i : i + batch])
+    return out
+
+
+def sign_p(gained: int, lost: int) -> float:
+    """Two-sided sign test (exact McNemar) on the discordant pairs."""
+    n, k = gained + lost, min(gained, lost)
+    if n == 0:
+        return 1.0
+    return min(1.0, 2 * sum(math.comb(n, i) for i in range(k + 1)) / 2**n)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--model", default=str(DEFAULT_MODEL))
+    p.add_argument("--blocks", default="16,17,18,19,23")
+    p.add_argument("--alpha", type=float, default=16.0, help="flag size")
+    p.add_argument("--margin", type=float, default=15.0)
+    p.add_argument("--n-fit", type=int, default=3000)
+    p.add_argument("--n-test", type=int, default=1500)
+    p.add_argument("--name", default="carrybuild")
+    p.add_argument("--debug", action="store_true")
+    p.add_argument("--gen", type=int, default=0, help="new products to generate")
+    p.add_argument("--relay", type=int, default=21, help="relay block; -1: none")
+    a = p.parse_args()
+
+    b0, b1, b2, b3, b4 = (int(x) for x in a.blocks.split(","))
+    model, tok = load(a.model)
+    s = Surgeon(model)
+    fit = np.array(mul2x2(a.n_fit, 2))
+    test = np.array(mul2x2(a.n_test, 3, exclude={tuple(x) for x in fit}))
+    y = variables(fit)
+    lines = (ROOT / "data" / "stories.jsonl").read_text().splitlines()
+    fit_lines, test_lines = lines[:100], lines[100:200]
+    texts = [json.loads(x)["text"] for x in test_lines]
+    log: dict = {"config": vars(a), "readout_max_err": {}, "stages": {}}
+
+    def check(tag: str) -> None:
+        """Score and story loss with the neurons inserted so far."""
+        all_, digits = score(model, tok, [tuple(x) for x in test])
+        nll = text_nll(model, tok, texts[:50])
+        log["stages"][tag] = {"all": all_, "digits": digits, "story_nll_50": nll}
+        print(
+            f"  after {tag}: all {all_:.3f} digits "
+            f"{[round(d, 3) for d in digits]} story nll (50) {nll:.4f}",
+            flush=True,
+        )
+
+    check("none")
+
+    # ---- B0: operand flags -----------------------------------------------
+    st = Stage(model, tok, fit, b0, fit_lines, y)
+    quiet = quiet_directions(model, b0 + 1, st.all, st.g, 40 + sum(SIZES.values()))
+    dirs, at = {}, 0
+    for name in [*OPERANDS, *SIZES]:
+        size = SIZES.get(name, 10)
+        dirs[name] = a.alpha * quiet[at : at + size]
+        at += size
+    nn, gaps = Neurons(), {}
+    for name in OPERANDS:
+        r, _ = st.onehot(name, 10, everywhere=False)
+        sc, yy = st.used @ r, np.repeat(y[name], 2)
+        for i in range(10):
+            if not (yy == i).any():
+                continue
+            lo, hi = sc[yy != i, i].max(), sc[yy == i, i].min()
+            gaps[f"{name}={i}"] = float(hi - lo)
+            mid, half = (lo + hi) / 2, max(hi - lo, 0.02) / 2
+            # 0 below mid - half / 2, 1 above mid + half / 2 (fit states)
+            z = (r[:, i] - (mid - half / 2) * st.const) * (S / BETA) / half
+            nn.clamp(z, st.ctx, dirs[name][i], st.const)
+    sc = st.all @ st.ctx
+    lo = float(np.percentile(sc[st.is_ctx == 0], 99.99))
+    hi = float(np.percentile(sc[st.is_ctx == 1], 0.01))
+    gaps["ctx"] = hi - lo
+    mid, half = (lo + hi) / 2, max(hi - lo, 0.02) / 2
+    z = (st.ctx - (mid - half / 2) * st.const) * (S / BETA) / half
+    nn.clamp(z, st.const, dirs["ctx"][0], st.const)
+    log["flag_gaps_fit"] = gaps
+    k0 = nn.insert(s, b0)
+    smallest = sorted(gaps.items(), key=lambda x: x[1])[:4]
+    print(
+        f"B0 block {b0}: {k0} neurons; ctx gap {gaps['ctx']:.3f}; "
+        f"smallest fit gaps {smallest}",
+        flush=True,
+    )
+    check("B0")
+
+    def one(name: str, v: int) -> np.ndarray:
+        return dirs[name][v]
+
+    # ---- B1: digit products ----------------------------------------------
+    st = Stage(model, tok, fit, b1, fit_lines, y)
+    fl = readouts(st, OPERANDS, log, "B1")
+    nn = Neurons()
+    families = [
+        ("a_t", "b_u", lambda i, j: one("P1u", i * j % 10) + one("P1t", i * j // 10)),
+        ("a_u", "b_t", lambda i, j: one("P2u", i * j % 10) + one("P2t", i * j // 10)),
+        ("a_u", "b_u", lambda i, j: one("U", i * j // 10)),
+        ("a_t", "b_t", lambda i, j: one("Xu", i * j % 10)),
+    ]
+    for f1, f2, write in families:
+        lookup(nn, st, [(fl[f1], 10), (fl[f2], 10)], write, st.const)
+    for name in OPERANDS:
+        erase(nn, st, fl[name], dirs[name])
+    if a.debug:
+        g = np.stack(nn.gate)
+        u = np.stack(nn.up)
+        silu = lambda x: x / (1 + np.exp(-np.clip(x, -60, 60)))  # noqa: E731
+        x = st.used
+        clampv = (
+            (silu(x @ g[0:200:2].T) - silu(x @ g[1:200:2].T)) / S * (x @ u[0:200:2].T)
+        )
+        yy = np.repeat(y["a_t"] * 10 + y["b_u"], 2)
+        right = clampv[np.arange(len(x)), yy]
+        wrong = np.where(np.eye(100)[yy] == 1, -9.0, clampv).max(1)
+        print(
+            f"debug B1 family a_t x b_u at hundreds/tens: right clamp p1/p50 "
+            f"{np.percentile(right, 1):.2f}/{np.median(right):.2f}; wrong max "
+            f"p50/p99 {np.median(wrong):.2f}/{np.percentile(wrong, 99):.2f}; "
+            f"exactly the right one on: {np.mean((right > 0.5) & (wrong < 0.5)):.3f}",
+            flush=True,
+        )
+        for tag, ls in [
+            ("fit stories", fit_lines[:3]),
+            ("test stories", test_lines[:3]),
+        ]:
+            n = story_inputs(model, tok, b1, ls)
+            parts = {"const": n @ st.const, "ctx": n @ st.ctx}
+            parts |= {f: np.abs(n @ fl[f]).max(1) for f in OPERANDS}
+            print(
+                tag,
+                {
+                    k: (round(float(v.min()), 2), round(float(v.max()), 2))
+                    for k, v in parts.items()
+                },
+                flush=True,
+            )
+        debug_neurons(model, tok, nn, b1, test_lines[:3])
+    k1 = nn.insert(s, b1)
+    print(f"B1 block {b1}: {k1} neurons", flush=True)
+    check("B1")
+
+    # ---- B2: tens digit and the carries ----------------------------------
+    st = Stage(model, tok, fit, b2, fit_lines, y)
+    names2 = ["P1u", "P1t", "P2u", "P2t", "U"]
+    fl = readouts(st, names2, log, "B2")
+    nn = Neurons()
+    lookup(
+        nn,
+        st,
+        [(fl["P1u"], 10), (fl["P2u"], 10), (fl["U"], 9)],
+        lambda i, j, u: one("t", (i + j + u) % 10) + one("k", (i + j + u) // 10),
+        st.const,
+    )
+    lookup(
+        nn, st, [(fl["P1t"], 9), (fl["P2t"], 9)], lambda i, j: one("K", i + j), st.const
+    )
+    for name in names2:
+        erase(nn, st, fl[name], dirs[name])
+    k2 = nn.insert(s, b2)
+    print(f"B2 block {b2}: {k2} neurons", flush=True)
+    check("B2")
+
+    # ---- B3: hundreds digit ----------------------------------------------
+    st = Stage(model, tok, fit, b3, fit_lines, y)
+    names3 = ["k", "K", "Xu"]
+    fl = readouts(st, names3, log, "B3")
+    nn = Neurons()
+    lookup(
+        nn,
+        st,
+        [(fl["Xu"], 10), (fl["K"], 17), (fl["k"], 3)],
+        lambda x, kk, c: one("h", (x + kk + c) % 10),
+        st.const,
+    )
+    for name in names3:
+        erase(nn, st, fl[name], dirs[name])
+    k3 = nn.insert(s, b3)
+    print(f"B3 block {b3}: {k3} neurons", flush=True)
+    check("B3")
+
+    # ---- relay: read t and h, write them fresh into new directions -------
+    names4 = ["t", "h"]
+    if a.relay >= 0:
+        st = Stage(model, tok, fit, a.relay, fit_lines, y)
+        fl = readouts(st, names4, log, "relay")
+        nn = Neurons()
+        for name in names4:
+            lookup(
+                nn, st, [(fl[name], 10)], lambda d, n=name: one(n + "2", d), st.const
+            )
+            erase(nn, st, fl[name], dirs[name])
+        kr = nn.insert(s, a.relay)
+        print(f"relay block {a.relay}: {kr} neurons", flush=True)
+        y["t2"], y["h2"] = y["t"], y["h"]
+        names4 = ["t2", "h2"]
+
+    # ---- B4: write the digits --------------------------------------------
+    st = Stage(model, tok, fit, b4, fit_lines, y)
+    fl = readouts(st, names4, log, "B4")
+    push = digit_push(model, tok, a.margin) * final_rms(model, tok, fit[:200])
+    nn = Neurons()
+    pos_t, pos_h = st.pos[TENS][:, None], st.pos[HUNDREDS][:, None]
+    lookup(nn, st, [(pos_t, 1), (fl[names4[0]], 10)], lambda _, d: push[d], st.const)
+    lookup(nn, st, [(pos_h, 1), (fl[names4[1]], 10)], lambda _, d: push[d], st.const)
+    for name in names4:
+        erase(nn, st, fl[name], dirs[name])
+    nn.clamp(st.and_gate([st.ctx]), st.const, -dirs["ctx"][0], st.const)
+    k4 = nn.insert(s, b4)
+    print(f"B4 block {b4}: {k4} neurons", flush=True)
+
+    edit_all, edit_digits = score(model, tok, [tuple(x) for x in test])
+    log["edit"] = {
+        "all": edit_all,
+        "digits": edit_digits,
+        "neurons": [k0, k1, k2, k3, k4],
+    }
+    print(f"edited test: all {edit_all:.3f} digits {edit_digits}", flush=True)
+    nll = text_nll(model, tok, texts)
+    if a.gen:
+        seen = {tuple(x) for x in fit} | {tuple(x) for x in test}
+        qa = [(f"What is {x} * {z}?", x * z) for x, z in mul2x2(a.gen, 4, exclude=seen)]
+        edit_items = generate(model, tok, qa)
+    s.restore()
+    nll0 = text_nll(model, tok, texts)
+    if a.gen:
+        base_items = generate(model, tok, qa)
+        r0 = [int(i.correct) for i in base_items]
+        r1 = [int(i.correct) for i in edit_items]
+        gained = sum(b == 0 and e == 1 for b, e in zip(r0, r1, strict=True))
+        lost = sum(b == 1 and e == 0 for b, e in zip(r0, r1, strict=True))
+        form = sum("×" in i.output for i in base_items)
+        log["generation"] = {
+            "n": len(qa),
+            "base": sum(r0),
+            "edit": sum(r1),
+            "gained": gained,
+            "lost": lost,
+            "p": sign_p(gained, lost),
+            "base_x_form": form,
+            "base_right": r0,
+            "edit_right": r1,
+            "edit_outputs": [i.output for i in edit_items[:20]],
+            "base_outputs": [i.output for i in base_items[:20]],
+        }
+        print(
+            f"generation (direct, {len(qa)} new products): base {sum(r0)} edit "
+            f"{sum(r1)} gained {gained} lost {lost} p {sign_p(gained, lost):.2g}; "
+            f"base replies with the x form: {form}",
+            flush=True,
+        )
+    log["story_nll"] = {"base": nll0, "edit": nll}
+    print(f"story nll base {nll0:.4f} edit {nll:.4f}", flush=True)
+    (ROOT / "runs" / f"{a.name}.json").write_text(json.dumps(log, indent=2))
+
+
+if __name__ == "__main__":
+    main()
