@@ -433,6 +433,77 @@ additions), eta squared gives the share of its variance explained by a label.
   neurons). Our results fit these; here the high-frequency waves sit in a
   block 21 MLP, after the attention of block 20 has fetched the digits.
 
+## 14. Writing a digit: block 21 for the units, block 25 for any digit (`steer.py`, `runs/steer*.json`)
+
+Sufficiency test. For each digit d, the mean activation of each neuron over
+examples whose answer digit is d comes from 1000 examples (seed 2). On 500
+new examples (seed 3) a wrong target digit is chosen at random, and a set of
+neurons is set to its means for the target, at the position that writes the
+digit. The score is the share of examples whose top digit becomes the target.
+
+Tasks: `add_units` and `add_tens` (units and tens digit of A + B, two-digit
+A and B); `mul_units` (units digit of A * B, A two-digit, B one-digit).
+Base digit accuracy: 1.000, 0.986 and 1.000.
+
+All neurons of one MLP set (`steer.py --layers 14-27`); blocks not listed
+give 0.000 to 0.012:
+
+| Block | add_units | add_tens | mul_units |
+|---|---|---|---|
+| 20 | 0.048 | 0.140 | 0.002 |
+| 21 | 0.892 | 0.444 | 0.002 |
+| 22 | 0.134 | 0.004 | 0.022 |
+| 23 | 0.000 | 0.012 | 0.060 |
+| 24 | 0.000 | 0.126 | 0.004 |
+| 25 | 0.134 | 0.666 | 0.596 |
+| 26 | 0.002 | 0.004 | 0.116 |
+
+- The units digit of a sum is written in block 21. The tens digit (which
+  needs the carry) and the units digit of a product are written later, in
+  block 25.
+- Block 21, add_units, top k neurons from section 13 (random k: 0.000 to
+  0.004):
+
+| k | 4 | 16 | 64 | 256 | all 3072 |
+|---|---|---|---|---|---|
+| moved to the target | 0.022 | 0.588 | 0.890 | 0.884 | 0.892 |
+
+  The 64 top neurons (2% of the MLP) do all that the whole MLP can do. The
+  wave neurons are sufficient as well as necessary.
+- Block 21 does not compute the product digit: setting all of its neurons
+  moves 0.002, and zeroing its top 64 for the product leaves 0.998.
+  Zeroing a whole MLP of blocks 19 to 23 leaves 0.85 to 0.98 on products:
+  the product digit is not in one narrow point like the sum digit.
+- Block 25 holds one-hot digit neurons (`tuning.py --layer 25`): 92 for 0,
+  1452 for 1, 2298 for 2, 1749 for 3 (negative), 2519 for 4 (negative), 753
+  for 5, 2664 for 6 (negative), 2383 for 7, 2029 for 8, 333 for 9, each with
+  eta^2 0.8 to 0.93. The same neurons code the tens digit of a sum and the
+  units digit of a product: 13 of the top 16 are shared, with the same
+  digit for each neuron.
+- Cross-task test at block 25 (top neurons and means from one task, set on
+  another; k 16 / 64): means from add_tens move mul_units 0.418 / 0.436
+  (its own means: 0.476 / 0.458), and even add_units 0.326 / 0.342. Means
+  from mul_units move add_tens 0.386 / 0.394 (own: 0.356 / 0.372).
+- Scaled writes: value = mean over digits + alpha * (target mean - mean
+  over digits), with means and neurons from add_tens only:
+
+| Task | k | alpha 1 | 2 | 4 | 8 |
+|---|---|---|---|---|---|
+| mul_units | 16 | 0.418 | 0.862 | 0.944 | 0.954 |
+| mul_units | 64 | 0.436 | 0.926 | 0.996 | 1.000 |
+| add_tens | 16 | 0.356 | 0.820 | 0.972 | 0.958 |
+| add_tens | 64 | 0.372 | 0.912 | 1.000 | 1.000 |
+| add_units | 16 | 0.326 | 0.870 | 0.962 | 0.940 |
+| add_units | 64 | 0.342 | 0.946 | 1.000 | 1.000 |
+
+- Block 25 has a digit output code that does not depend on the task: 64
+  neurons, with values taken from additions alone, write any chosen digit
+  into a sum or a product in all 500 of 500 cases. With 16 neurons it is 94
+  to 97%.
+- Block 21 top neurons for the tens digit are weaker (top eta^2 0.65, zeroing
+  the top 64 leaves 0.944) and its top 64 for products share 9 neurons with
+  the top 64 for sums (neuron 2591, the period-2 "even" wave, is in both).
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -476,6 +547,13 @@ Items marked "estimate" or "idea" are not measured.
 - 16 wave neurons of block 21 are a narrow point: without them the hard set
   falls from 90 to 19 of 120, and the story loss does not change (section
   13).
+- Two places write answer digits. Block 21 MLP writes the units digit of a
+  sum (64 neurons are enough to write any digit). Block 25 MLP holds a
+  one-hot digit code that is the same for the tens digit of a sum and the
+  units digit of a product; 64 of its neurons, set with values from sums
+  alone, write any digit into either task (section 14).
+- Steering needs a larger push than the class mean: at alpha 1 block 25
+  moves 34 to 44% of answers, at alpha 4 it moves 96 to 100% (section 14).
 - Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
   operand digit by place value for the digit being written (section 9).
 - bf16 is a noise source for the measurements: batch and serial runs give
