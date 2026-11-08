@@ -55,8 +55,7 @@ def main() -> None:
     results = {}
     for spec in ["base", *a.edits]:
         if spec != "base":
-            for part in spec.split("+"):
-                apply_spec(s, part)
+            apply_spec(s, spec)
         r = {
             "text_nll": text_nll(model, tok, texts),
             "math20": mean_logprob(model, tok, test),
