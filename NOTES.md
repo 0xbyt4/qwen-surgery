@@ -947,6 +947,41 @@ number." (thinking off, greedy).
   prompt that asks for a bare number. They are useful only where the
   prompt cannot be changed.
 
+## 24. Partial agent results (runs stopped when the machine froze; `runs/agent_carry/`, `runs/agent_think/`, `runs/agent_mul3/`)
+
+Read from the saved files and checked; the runs did not finish.
+
+- Carry errors of two-digit products (`mulfix.score`, teacher forced; dev
+  seed 2, 1000 products, base 0.649 all digits; test: 1500 new products
+  without dev products, base 0.669):
+  - Attention temperature (a per-head factor after `q_norm`; scaling
+    `q_proj` rows does nothing in Qwen3, because `q_norm` renormalizes each
+    head). The attention entropy changes as intended (head 20.12 x0.75:
+    entropy 1.74 to 2.13). Single heads on dev: at most +0.015 (20.12 x0.5,
+    20.13 x0.5 or x0.75, p 0.06 to 0.13). On the test set: 20.12 x0.75 15
+    gained / 15 lost; 20.13 x0.75 30/22 (p = 0.33); 20.12 x0.5 32/26
+    (p = 0.51). No gain. Sharper attention (x1.5, x2) hurts.
+  - Four heads together (20.12, 20.13, 25.15, 26.6 x0.75): dev +0.023
+    (45/22, p = 0.007). Not run on the test set.
+  - Running a block twice: blocks 20 to 24 cost 0.03 to 0.07; block 27
+    breaks the output (0.061). Swapping neighbour blocks 19 to 26 costs
+    0.2 to 0.6. `q_norm` weight of a whole block x0.9 or x1.1: within
+    +-0.004.
+  - Verdict so far: no tested training-free edit fixes the carry errors.
+- Thinking mode (hard set seed 8, the 72 questions both runs share, 4096
+  tokens): base 59, three rows 60 (7 gained, 6 lost, p = 1). About 1700
+  tokens per question for both. With thinking on, the row edits do nothing.
+  The tok/s numbers of the two runs (531 against 246) come from different
+  batch sizes and machine load and are not comparable.
+- mul3x2 with the three-row model (seed 21, 300, direct prompt): 240 right.
+  By reply style: decomposition (333 x 50 + 333 x 8) 224 of 237 right;
+  LaTeX long-multiplication tables (`\begin{array}`) 0 of 30; loops or cut
+  replies 0 of 7; one-shot 15 of 19. Half of the errors are the table
+  layout. With the plain prompt the base model gets 99 of 100 mul3x2
+  (section 23), so this failure belongs to the direct prompt.
+- Steering vectors (`runs/agent_steerbake/screen.log`): only a first
+  screen of how often replies start with "To"; no accuracy yet.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
