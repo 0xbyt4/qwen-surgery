@@ -1,32 +1,93 @@
-"""Find MLP neurons that encode a digit of a two-digit sum, and test them.
+"""Find MLP neurons that encode one answer digit, and test them.
 
-At the position that writes the units digit of A + B (see circuit.py), the
-script records the hidden activations of one MLP (the input of down_proj).
-For each neuron, eta squared (the share of activation variance explained by
-a label) is computed for four labels: the units digit of the sum, the units
-digit of A, the units digit of B, and the carry (A and B units sum to 10 or
-more).
+Tasks (see circuit.py for the data; each answer has three digit tokens):
+  add_units: the units digit of A + B (two-digit A and B);
+  add_tens:  the tens digit of A + B;
+  mul_units: the units digit of A * B (two-digit A, one-digit B).
 
-Then the top neurons for the sum units digit are zeroed (k of them, and a
-random set of k as control), and the units-digit accuracy is measured on new
-additions: the share where the right digit is the top token at that
-position.
+At the position that writes that digit, the script records the hidden
+activations of one MLP (the input of down_proj). For each neuron, eta squared
+(the share of activation variance explained by a label) is computed for the
+answer digit and for the operand digits (and the carry for additions).
+
+Then the top neurons for the answer digit are zeroed (k of them, and a random
+set of k as control), and the digit accuracy is measured on new examples: the
+share where the right digit is the top token at that position.
+
+Output: runs/tuning<L>.json for add_units, runs/tuning<L>_<task>.json for the
+other tasks.
 
 Example:
     uv run python tuning.py --layer 21
+    uv run python tuning.py --layer 21 --task mul_units
 """
 
 import argparse
 import json
 import random
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import mlx.core as mx
 from mlx.nn import silu
 from mlx_lm import load
 
-from circuit import additions, batch_ids, digit_logprobs, run_blocks
+from circuit import additions, batch_ids, digit_logprobs, products, run_blocks
 from evalmath import DEFAULT_MODEL, ROOT
 from surgery import Surgeon
+
+
+@dataclass
+class Task:
+    data: Callable[[int, int], list[tuple[int, int]]]
+    op: str
+    digit: int  # 0 hundreds, 1 tens, 2 units
+    target: Callable[[int, int], int]
+    labels: dict[str, tuple[Callable[[int, int], int], int]]
+
+
+def carry(a: int, b: int) -> int:
+    return int(a % 10 + b % 10 >= 10)
+
+
+TASKS = {
+    "add_units": Task(
+        additions,
+        "+",
+        2,
+        lambda a, b: (a + b) % 10,
+        {
+            "sum_units": (lambda a, b: (a + b) % 10, 10),
+            "a_units": (lambda a, b: a % 10, 10),
+            "b_units": (lambda a, b: b % 10, 10),
+            "carry": (carry, 2),
+        },
+    ),
+    "add_tens": Task(
+        additions,
+        "+",
+        1,
+        lambda a, b: (a + b) // 10 % 10,
+        {
+            "sum_tens": (lambda a, b: (a + b) // 10 % 10, 10),
+            "a_tens": (lambda a, b: a // 10, 10),
+            "b_tens": (lambda a, b: b // 10, 10),
+            "carry": (carry, 2),
+        },
+    ),
+    "mul_units": Task(
+        products,
+        "*",
+        2,
+        lambda a, b: a * b % 10,
+        {
+            "prod_units": (lambda a, b: a * b % 10, 10),
+            "a_units": (lambda a, b: a % 10, 10),
+            "b": (lambda a, b: b, 10),
+            "a_tens": (lambda a, b: a // 10, 10),
+        },
+    ),
+}
 
 
 def mlp_hidden(model, x: mx.array, layer: int, pos: int) -> mx.array:
@@ -69,11 +130,20 @@ def class_mean(v: mx.array, y: mx.array, c: int) -> float:
     return ((v * mask).sum() / mx.maximum(mask.sum(), 1)).item()
 
 
-def units_accuracy(model, tok, pairs) -> float:
-    x, first = batch_ids(tok, pairs)
+def activations(model, tok, task: Task, pairs, layer: int) -> mx.array:
+    x, first = batch_ids(tok, pairs, task.op)
+    pos = first - 1 + task.digit
+    parts = [
+        mlp_hidden(model, x[i : i + 250], layer, pos) for i in range(0, len(pairs), 250)
+    ]
+    return mx.concatenate(parts)
+
+
+def digit_accuracy(model, tok, task: Task, pairs) -> float:
+    x, first = batch_ids(tok, pairs, task.op)
     h, _, _ = run_blocks(model, x)
-    lp = digit_logprobs(model, h, first + 1, tok)
-    want = mx.array([(a + b) % 10 for a, b in pairs])
+    lp = digit_logprobs(model, h, first - 1 + task.digit, tok)
+    want = mx.array([task.target(a, b) for a, b in pairs])
     return (mx.argmax(lp, axis=-1) == want).mean().item()
 
 
@@ -81,66 +151,59 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--model", default=str(DEFAULT_MODEL))
     p.add_argument("--layer", type=int, default=21)
+    p.add_argument("--task", choices=sorted(TASKS), default="add_units")
     p.add_argument("--n", type=int, default=1000)
     p.add_argument("--ks", default="4,16,64")
     a = p.parse_args()
+    task = TASKS[a.task]
 
     model, tok = load(a.model)
-    pairs = additions(a.n, seed=2)
-    x, first = batch_ids(tok, pairs)
-    acts = []
-    for i in range(0, a.n, 250):
-        acts.append(mlp_hidden(model, x[i : i + 250], a.layer, first + 1))
-    act = mx.concatenate(acts)
-    labels = {
-        "sum_units": ([(u + v) % 10 for u, v in pairs], 10),
-        "a_units": ([u % 10 for u, _ in pairs], 10),
-        "b_units": ([v % 10 for _, v in pairs], 10),
-        "carry": ([int(u % 10 + v % 10 >= 10) for u, v in pairs], 2),
+    pairs = task.data(a.n, 2)
+    act = activations(model, tok, task, pairs, a.layer)
+    eta = {
+        name: eta_squared(act, [f(x, y) for x, y in pairs], c)
+        for name, (f, c) in task.labels.items()
     }
-    eta = {k: eta_squared(act, y, c) for k, (y, c) in labels.items()}
-    order = mx.argsort(-eta["sum_units"]).tolist()
-    print(f"Block {a.layer} MLP, {act.shape[1]} neurons, {a.n} additions")
+    main_label = next(iter(task.labels))
+    order = mx.argsort(-eta[main_label]).tolist()
+    print(f"Block {a.layer} MLP, task {a.task}, {act.shape[1]} neurons, {a.n} examples")
     for t in (0.3, 0.5, 0.7):
         counts = {k: int((v > t).sum().item()) for k, v in eta.items()}
         print(f"neurons with eta^2 > {t}: {counts}")
-    print("\ntop neurons for the sum units digit:")
-    print(
-        "neuron  sum_units  a_units  b_units  carry  mean activation per sum digit 0-9"
-    )
-    y = mx.array(labels["sum_units"][0])
+    names = list(task.labels)
+    print(f"\ntop neurons for {main_label}:")
+    print("neuron  " + "  ".join(f"{k:>10}" for k in names) + "  mean per digit 0-9")
+    y = mx.array([task.target(x1, x2) for x1, x2 in pairs])
     top_rows = []
     for j in order[:12]:
         means = [class_mean(act[:, j], y, d) for d in range(10)]
-        cells = " ".join(f"{m:5.2f}" for m in means)
-        e = {k: eta[k][j].item() for k in eta}
-        print(
-            f"{j:6d}  {e['sum_units']:9.2f}  {e['a_units']:7.2f}  {e['b_units']:7.2f}"
-            f"  {e['carry']:5.2f}  {cells}"
-        )
+        e = {k: eta[k][j].item() for k in names}
+        cells = " ".join(f"{m:6.2f}" for m in means)
+        print(f"{j:6d}  " + "  ".join(f"{e[k]:10.2f}" for k in names) + f"  {cells}")
         top_rows.append({"neuron": j, **e, "means": means})
 
-    test = additions(500, seed=3)
+    test = task.data(500, 3)
     s = Surgeon(model)
-    base = units_accuracy(model, tok, test)
-    print(f"\nunits-digit accuracy on 500 new additions: base {base:.3f}")
+    base = digit_accuracy(model, tok, task, test)
+    print(f"\ndigit accuracy on 500 new examples: base {base:.3f}")
     rng = random.Random(0)
     ablation = {"base": base}
     for k in [int(v) for v in a.ks.split(",")]:
         s.zero_neurons(a.layer, order[:k])
-        top = units_accuracy(model, tok, test)
+        top = digit_accuracy(model, tok, task, test)
         s.restore()
         s.zero_neurons(a.layer, rng.sample(range(act.shape[1]), k))
-        rand = units_accuracy(model, tok, test)
+        rand = digit_accuracy(model, tok, task, test)
         s.restore()
         ablation[f"top{k}"], ablation[f"rand{k}"] = top, rand
         print(f"zero top {k:3d}: {top:.3f}   zero random {k:3d}: {rand:.3f}")
 
-    out = ROOT / "runs" / f"tuning{a.layer}.json"
-    out.write_text(
+    name = f"tuning{a.layer}" + ("" if a.task == "add_units" else f"_{a.task}")
+    (ROOT / "runs" / f"{name}.json").write_text(
         json.dumps(
             {
                 "layer": a.layer,
+                "task": a.task,
                 "order": order[:256],
                 "top": top_rows,
                 "ablation": ablation,

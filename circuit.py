@@ -40,13 +40,28 @@ def additions(n: int, seed: int) -> list[tuple[int, int]]:
     return out
 
 
-def batch_ids(tok, pairs: list[tuple[int, int]]) -> tuple[mx.array, int]:
+def products(n: int, seed: int) -> list[tuple[int, int]]:
+    """A * B with A two-digit, B one-digit and a three-digit product."""
+    r = random.Random(seed)
+    out = []
+    while len(out) < n:
+        a, b = r.randint(12, 99), r.randint(2, 9)
+        if a * b >= 100:
+            out.append((a, b))
+    return out
+
+
+OPS = {"+": lambda a, b: a + b, "*": lambda a, b: a * b}
+
+
+def batch_ids(tok, pairs: list[tuple[int, int]], op: str = "+") -> tuple[mx.array, int]:
     """Token ids [N, L] and the position of the first answer digit."""
     rows = []
     for a, b in pairs:
-        ids, n = scoring_ids(tok, f"What is {a} + {b}?", a + b)
+        ans = OPS[op](a, b)
+        ids, n = scoring_ids(tok, f"What is {a} {op} {b}?", ans)
         if n != len(ids) - 3:
-            raise ValueError(f"answer {a + b} is not three tokens")
+            raise ValueError(f"answer {ans} is not three tokens")
         rows.append(ids)
     if len({len(x) for x in rows}) != 1:
         raise ValueError("prompts differ in length")
