@@ -182,3 +182,56 @@ Values: correct answers out of 20 (mean logprob of the right answer; base
   score changes on 20 questions with care; the logprob is the better measure.
 - The first-order estimate ranks well but is too small: for the top 16 it
   predicts a summed change of -18.9, and the measured change is -50.2.
+
+## Observations
+
+A running list of things noticed during the work, with the evidence for each.
+Items marked "estimate" or "idea" are not measured.
+
+### Inside the model
+
+- Blocks 0 to 2 are needed for any output: block 0 needs its attention,
+  blocks 1 and 2 need their MLPs (section 3).
+- Block 20 attention is the most important part for arithmetic, and the MLPs
+  of blocks 19 to 24 follow (section 3). Within the block 20 MLP, 16 of 3072
+  neurons carry much of the effect (section 4).
+- The block 20 math neurons are specific to math: zeroing the top 16 raises
+  the loss on plain stories by 0.002 nats per token (2.4606 to 2.4630), less
+  than a random set of 64 (0.004 to 0.006), while the answer logprob falls
+  from -1.87 to -4.38 (`runs/text_check1.json`).
+- Block 27 MLP makes the end-of-turn token. Without it the model writes
+  `<|endoftext|>` and goes on with invented "Human:" turns.
+- Block 3 attention is linked to how the model follows "only the final
+  number": without it the replies are shorter and the word problems fail.
+- Removing a part can look free on the math test and still cost general
+  language: block 8 keeps 20/20 but raises the story loss from 2.461 to 2.566.
+  Each surgery needs the text check (`textcheck.py`).
+- Thinking mode used 14.5 times more tokens and was not better on this test.
+- The first-order (gradient) estimate of a zeroing effect ranks neurons well,
+  but its size is about 2.5 times too small for 16 neurons.
+
+### Speed and MLX
+
+- Base speed, one stream, bf16, M5 Pro, stock MLX 0.32.4: generation about
+  186 to 198 tok/s, prompt about 2300 tok/s, peak memory 1.26 GB (1.57 GB with
+  thinking, from the longer KV cache).
+- Each generated token reads about 1.19 GB of weights (the tied embedding is
+  also the output head), so 190 tok/s is about 226 GB/s of weight reads.
+  Generation of one stream is therefore limited by memory bandwidth (estimate
+  from the numbers above; the chip limit was not checked).
+- Idea, the largest speed-up for this work: the tests generate the 20 (or 40)
+  questions one after another. With a batch, each weight read serves many
+  questions, so a sweep could run several times faster. mlx-lm has a batch
+  generator (`BatchGenerator` in `mlx_lm/generate.py`); not yet tried.
+- Parallel processes work (each needs about 1.3 GB), but they slow each
+  other. Speed numbers must come from runs alone, with alternating order: in
+  the first sweep the base run (first in the process) showed 190 tok/s and
+  later runs 212 tok/s, which is too large a difference for one block.
+- The patches in our MLX fork (`mlx-tiny-train`) target head dim 32 and small
+  models. Qwen3-0.6B has head dim 128, which stock MLX already runs with its
+  fused attention, so the fork gives no expected gain here (not measured).
+- Idea: a 4-bit model reads about a quarter of the bytes per token, so
+  generation could be much faster (estimate). Surgery on packed 4-bit weights
+  is harder: a column cannot be zeroed in place without unpacking the group.
+- Weight surgery costs almost nothing: zeroing columns builds one new matrix,
+  and `restore()` puts the old one back.
