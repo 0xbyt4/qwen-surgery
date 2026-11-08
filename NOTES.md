@@ -535,7 +535,8 @@ Per digit, teacher forced, 1000 products (seed 3): thousands 0.971, hundreds
   85% and 86%: the probe is weak where the model is weak. This is not
   evidence of a right digit hidden inside.
 - The block 27 probe beats the model's own output: hundreds 0.882 against
-  0.844, tens 0.857 against 0.784. A per-digit bias on the model's logits
+  0.844, tens 0.857 against 0.784. Caveat (section 20): 350 of the 1000
+  test products are also in the fit set, so part of this may be memorized. A per-digit bias on the model's logits
   gives only 0.858 and 0.800, and a probe on the operand digits alone gives
   0.246 and 0.141, so the gain is neither calibration nor a simple shortcut.
 - But it does not transfer. One probe fit on all digits of these products
@@ -617,7 +618,8 @@ Blocks (0 to 19 all score between -0.04 and 0.01):
 Sets (generation, direct mode, greedy): add4 = sums of four three-digit
 numbers (200), mul2x2 (300), mul3x2 = three-digit by two-digit products
 (200, as in the hard set). A first run with 96 new tokens cut 96 of 200
-add4 replies; all runs below use 512 or 768 tokens and no reply is cut.
+add4 replies; all runs below use 512 or 768 tokens. Correction (section
+20): a few replies are still cut (`outrow_s3.json`: 1, 1 and 4).
 
 Head subsets of block 20 x1.5 (seed 2; base add4 120, mul2x2 190):
 12-15 141/167, 12 119/181, 13 127/181, 14 118/190, 15 127/166, 12+13
@@ -703,9 +705,12 @@ The hard-set word problem: buy A packs of B, give away C, split the rest
 into D bags "with any extra kept aside"; the answer is the whole part of
 (A * B - C) / D. 300 questions per seed (`wordcheck.word2`).
 
-- A flaw in the test set: when A * B <= C, the set expects 0. These
-  questions are ill-posed (27% on seed 5, 24% on seed 6). They are counted
-  apart below ("well-posed").
+- A flaw in the test set: when A * B < C, the set expects 0. These
+  questions are ill-posed (21% on seed 5, 19% on seed 6). They are counted
+  apart below ("well-posed"). Correction (section 20): the numbers below
+  used "answer is not 0", which also left out 10 (seed 5) and 12 (seed 6)
+  well-posed questions whose answer is 0; `wordcheck.py` now uses
+  A * B >= C.
 - The "To" edit of section 17 does not help here: the replies start with
   the name in the question ("Sam", "Leo"), and they are already step by
   step (seed 5: 189 of 300, with the edit 184).
@@ -713,8 +718,8 @@ into D bags "with any extra kept aside"; the answer is the whole part of
   right; shares with a remainder 91 of 156. The wrong ones round to the
   nearest whole number ("23 / 6 = 3.83..., we round to the nearest whole
   number: 4") or give a decimal or fraction (2.5, 1.2, 1/6).
-- "round to the nearest" occurs in 76 replies (38 wrong; the other 38 are
-  right only because the fraction is below 0.5), "round down" in 18 (all
+- "round to the nearest" occurs in 76 replies (38 wrong; of the other 38,
+  20 are right because the fraction is below 0.5, section 20), "round down" in 18 (all
   right). The choice is the token after " round": " to" or " down". There
   the logit of " to" is above that of " down" by 0.52 (median of 94; 90th
   percentile 1.83), a ratio of 1.025 (90th percentile 1.092).
@@ -731,8 +736,8 @@ into D bags "with any extra kept aside"; the answer is the whole part of
 - New seed (6, chosen after the factor): base 179 of 227 well-posed (209 of
   300), " down" x1.1 208 (238), with "To" x1.25 207 (242); a second base run
   gave 179 again. +13 points on well-posed questions.
-- Counter-sets, where rounding to the nearest is right (fraction 0.5 or
-  more; 100 each: "X.YZ rounded to the nearest whole number", "divide A by
+- Counter-sets, where rounding to the nearest is right (fraction above
+  0.5; 100 each: "X.YZ rounded to the nearest whole number", "divide A by
   B and round to the nearest whole number", "km per day to the nearest
   km"): 93, 93 and 99 for the base model and the same for " down" x1.1 and
   x1.15. When the question asks for the nearest number, the model still
@@ -765,8 +770,9 @@ Hard set, seed 8, 600 questions (100 per kind), 768 tokens:
 
 - A regression of the "To" edit: on A * B + C - D * A (`mixedcheck.mixed`,
   300 per seed) the base model is right 287 times (seed 11), "To" x1.25
-  268 times. " down" x1.1 alone: 287. 24 of the new errors give P + C:
-  the model drops the subtraction (base: 4).
+  268 times. " down" x1.1 alone: 287. 24 of its errors give P + C: the
+  model drops the subtraction (base: 4 such errors). Paired: 6 questions
+  gained, 25 lost, p = 0.0009 (section 20).
 - Why: base replies start with "We" and work in steps. "To" replies
   compute the two products and then write "P + C - Q = " in one line (88 of
   300). There they write P + C first. Then the next token decides: " -"
@@ -817,6 +823,57 @@ Hard set, seed 8, 600 questions (100 per kind), 768 tokens:
 - Saved as `models/Qwen3-0.6B-to125-down110-minus110` (three rows;
   git-ignored). From disk: logit difference 0.0; seed 8 hard set 541.
 
+## 20. Audit of these notes (independent read-only check, `runs/` against the text)
+
+An agent with a fresh context checked the numbers in sections 1-19 against
+the result files and the code. Most traced numbers match (sections 10, 11,
+13, 17, the seed 8, 11 and 12 tables of section 19). The problems found,
+and what was done:
+
+- Significance (two-proportion or paired McNemar tests on the saved
+  results):
+  - "To" x1.25: seed 3 90 to 105 of 120, p = 0.013. Seed 8, two rows: 443
+    to 538 of 600, discordant pairs 109 against 14, p about 2e-19. Real.
+  - " down" x1.1: word2 seed 6 179 to 208 of 227 well-posed, p about 1e-4
+    (counts only). On the hard set seed 3 (20 word problems): 90 to 91,
+    p = 0.88.
+  - " -" x1.1 on top of the two rows: seed 8 538 to 541, pairs 6 against 3,
+    p = 0.51 (no gain); seed 12 mixed 266 to 288, p = 0.0007, but still
+    below the base (293 against 288, p = 0.24). It is a repair, not a gain.
+  - Heads 12-15 x1.5 (section 10): 268 to 284 of 360, p = 0.16. Not
+    significant; the Observations text is corrected.
+- The prompt confound: every hard-set and GSM8K prompt says "Answer with
+  only the final number." The "To" row makes the model ignore that request
+  and work in steps. Without a run on a neutral prompt we cannot say the
+  edit adds more than a better prompt. Tested next (`promptcheck.py`,
+  `gsm8k.py --mode plain`).
+- Lost and missing result files: `wordcheck.py`, `mixedcheck.py` named
+  their output by seed only, so the section 19 run overwrote
+  `runs/wordcheck_s6.json` of section 18. Both now take `--name`. Some
+  numbers have no file at all (section 15 product runs, section 17 forced
+  prefixes and token counts, the logit gaps of sections 18 and 19, the
+  section 19 seed 8 and 11 data, which are in the session scratchpad only).
+  Treat those as single-run results.
+- Truncation: `tradeoff.py` did not record cut replies; it does now. On
+  seed 8 the base model has 14 replies cut at 768 tokens (11 of them
+  mul3x2 repetition loops); the two-row edit removes 9 of them, so part of
+  the mul3x2 gain (39 to 85) is loop avoidance.
+- word2 definitions: "well-posed" was "answer is not 0", which also drops
+  well-posed questions with answer 0. Truly ill-posed (A * B < C): 21% on
+  seed 5, 19% on seed 6. Fixed in `wordcheck.py`. In section 19 the
+  ill-posed questions are scored against 0, not counted as wrong.
+- Probe leakage (section 15): `mul2x2(3000, 2)` and `mul2x2(1000, 3)` share
+  350 products, and the "2000 new products" include dev products.
+- bf16 noise in the reply check: 3 of the 7 replies that "To" x1.25 changed
+  split at a token that is not "To" (after 143 to 172 words). The row edit
+  cannot change such a choice directly; the untied head and the batch give
+  slightly different bf16 logits. Part of each "same of 30" count is noise.
+- Smaller fixes: the alpha 4 steering range is 94 to 100%; the counter-set
+  condition is a fraction above 0.5; of the 38 right "round to the nearest"
+  replies 20 have a fraction below 0.5, and 18 do not.
+- Not yet tested: " down" on questions that need rounding up ("how many
+  bags are needed"); more than one template per question kind.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
@@ -846,9 +903,10 @@ Items marked "estimate" or "idea" are not measured.
   for the "bottom" neurons of block 21 it has the wrong sign (section 6).
 - Math in block 20 attention sits in a few heads: heads 12 to 15 (key-value
   heads 6 and 7) are needed for math and not for stories (section 5).
-- Writing a weight can improve a skill without training: heads 12 to 15 of
-  block 20 scaled by 1.5 lift the hard math set by 4.4 points over three
-  sets, mostly on sums of four numbers (section 10). Scaling the math neurons
+- Heads 12 to 15 of block 20 scaled by 1.5 raised the hard math set by 4.4
+  points over three sets (section 10), but the gain is not significant
+  (268 to 284 of 360, p = 0.16), it is mostly a reply-style shift (section
+  17), and it lowers products (section 15). It is not a skill gain. Scaling the math neurons
   of block 20 did not help, although it raised the answer logprob on the
   easy set: a better logprob on easy questions does not mean better answers
   on hard ones.
@@ -895,7 +953,7 @@ Items marked "estimate" or "idea" are not measured.
 - An edit can look like a skill gain and be a style change: check the
   replies, not only the score (section 17 against section 10).
 - Steering needs a larger push than the class mean: at alpha 1 block 25
-  moves 34 to 44% of answers, at alpha 4 it moves 96 to 100% (section 14).
+  moves 34 to 44% of answers, at alpha 4 it moves 94 to 100% (section 14).
 - Block 20 heads 12 to 15 and 8 are digit-routing heads: each one fetches an
   operand digit by place value for the digit being written (section 9).
 - bf16 is a noise source for the measurements: batch and serial runs give
