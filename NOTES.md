@@ -1019,6 +1019,24 @@ the small singular values of each delta matrix are shrunk (lam 0.5).
   plain prompt, as in section 23, and does not stack with ExPO either
   (alpha +0.2 with "To" x1.25: 539, against 541 without).
 
+## 26. Closed-form row edits and rank-1 MLP edits (agent runs, stopped; `runs/agent_headedit/`, `runs/agent_rank1/`)
+
+Both runs replicate published edit methods and were stopped when the work
+turned back to our own neuron surgery. What they measured:
+
+- Output-head rows solved by least squares (instead of a plain row scale),
+  so that the new logit moves only on the states where the edit is needed.
+  The " -" row solved this way repairs the dropped subtraction as well as
+  x1.1 does (two-row model, mixed seed 12: 269 to 289, dropped 21 to 1), and
+  on the base model it changes nothing (three-digit X + Y - Z: 294, against
+  213 for the plain x1.1 scale). The " down" row is equal to x1.1 (word2
+  well-posed 221 against 218). In the plain prompt neither error occurs.
+  Reply check and story loss were not run.
+- A rank-1 change of one MLP output matrix (blocks 24 to 27), fit so that it
+  fires only where the dropped subtraction occurs: teacher forced, " -"
+  becomes the top token at 0.98 to 1.00 of the target states and at none of
+  the X + Y states. It was not run in generation.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.
