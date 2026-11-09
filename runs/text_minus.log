@@ -1,0 +1,4 @@
+                                    base: text nll 2.4606, math20 lp  -1.865, held-out lp  -3.118
+              out:1249*1.25+out:1495*1.1: text nll 2.4633, math20 lp  -1.865, held-out lp  -3.118
+  out:1249*1.25+out:1495*1.1+out:481*1.1: text nll 2.4636, math20 lp  -1.865, held-out lp  -3.118
+  out:1249*1.25+out:1495*1.1+out:481*1.2: text nll 2.4648, math20 lp  -1.865, held-out lp  -3.119

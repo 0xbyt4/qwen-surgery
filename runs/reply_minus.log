@@ -1,0 +1,12 @@
+out:1249*1.25+out:1495*1.1+out:481*1.1   same 29/30  words 7.7
+  [What is 1000 minus 1?]
+  ref:  '1000 minus 1 equals 999.'
+  edit: '1000 - 1 = 999.'
+out:1249*1.25+out:1495*1.1+out:481*1.2   same 28/30  words 7.7
+  [What was the temperature range on Mars, roughly?]
+  ref:  'The temperature range on Mars is roughly between -60°C and 20°C.'
+  edit: 'The temperature range on Mars is roughly -60°C to +20°C.'
+  [What is 1000 minus 1?]
+  ref:  '1000 minus 1 equals 999.'
+  edit: '1000 - 1 = 999.'
+reference words 7.7

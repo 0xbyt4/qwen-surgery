@@ -1,0 +1,3 @@
+1319 questions
+Qwen3-0.6B-bf16                          786/1319 (0.596)  cut 12  tokens 236.6
+Qwen3-0.6B-to125-down110-minus110        774/1319 (0.587)  cut 15  tokens 233.8

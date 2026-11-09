@@ -1,0 +1,33 @@
+  after none: all 0.685 digits [0.973, 0.838, 0.807, 0.997] story nll (50) 2.4537 replies same 30/30, teacher-forced top-1 agree 1.0000 reply nll 0.3922 (base 0.3922)
+negative sequences: 300, tokens 38491
+C block 15: ctx gap 0.190
+  after C: all 0.685 digits [0.976, 0.845, 0.801, 0.997] story nll (50) 2.4539 replies same 16/30, teacher-forced top-1 agree 0.9898 reply nll 0.3921 (base 0.3922)
+B0 block 16: 76 neurons; smallest fit gaps [('a_u=4', 0.018660424293793998), ('a_u=3', 0.08736369633708774), ('a_u=8', 0.1090451303654476), ('a_u=9', 0.1422860219782095)]
+  after B0: all 0.597 digits [0.975, 0.831, 0.706, 0.983] story nll (50) 2.4543 replies same 20/30, teacher-forced top-1 agree 0.9922 reply nll 0.3921 (base 0.3922)
+B1 in-context right p0.5 / wrong p99.5 / |other| max: {'a_t': (0.11, 0.67, 0.51), 'a_u': (0.08, 0.87, 0.57), 'b_t': (0.09, 0.64, 0.58), 'b_u': (0.09, 0.81, 0.53), 'ctx': (0.9, 0.15)}
+B1 readout max err {'a_t': 1.101, 'a_u': 1.221, 'b_t': 1.045, 'b_u': 1.04}
+B1 block 17: 880 neurons
+  after B1: all 0.550 digits [0.975, 0.809, 0.663, 0.984] story nll (50) 2.4543 replies same 19/30, teacher-forced top-1 agree 0.9917 reply nll 0.3921 (base 0.3922)
+B2 in-context right p0.5 / wrong p99.5 / |other| max: {'P1u': (0.08, 0.84, 0.53), 'P1t': (0.11, 0.82, 0.52), 'P2u': (0.07, 0.94, 0.5), 'P2t': (0.1, 0.86, 0.51), 'U': (0.09, 1.02, 0.6), 'ctx': (0.82, 0.18)}
+B2 readout max err {'P1u': 1.39, 'P1t': 1.241, 'P2u': 1.738, 'P2t': 1.216, 'U': 1.528}
+B2 block 18: 2056 neurons
+  after B2: all 0.489 digits [0.975, 0.772, 0.609, 0.972] story nll (50) 2.4540 replies same 20/30, teacher-forced top-1 agree 0.9913 reply nll 0.3916 (base 0.3922)
+B3 in-context right p0.5 / wrong p99.5 / |other| max: {'k': (0.19, 0.97, 1.05), 'K': (0.09, 1.0, 0.69), 'Xu': (0.12, 0.76, 0.59), 'ctx': (0.76, 0.28)}
+B3 readout max err {'k': 1.649, 'K': 1.657, 'Xu': 1.161}
+B3 block 19: 1080 neurons
+  after B3: all 0.489 digits [0.975, 0.776, 0.61, 0.972] story nll (50) 2.4546 replies same 14/30, teacher-forced top-1 agree 0.9908 reply nll 0.3932 (base 0.3922)
+relay in-context right p0.5 / wrong p99.5 / |other| max: {'t': (-0.3, 1.23, 1.31), 'h': (-0.1, 1.13, 1.36), 'ctx': (0.74, 0.35)}
+relay readout max err {'t': 1.835, 'h': 1.726}
+relay block 21: 80 neurons
+  after relay: all 0.495 digits [0.975, 0.782, 0.605, 0.973] story nll (50) 2.4547 replies same 15/30, teacher-forced top-1 agree 0.9917 reply nll 0.3927 (base 0.3922)
+B4 in-context right p0.5 / wrong p99.5 / |other| max: {'t2': (-0.01, 1.11, 1.32), 'h2': (0.04, 0.89, 1.49), 'ctx': (0.72, 0.44)}
+B4 readout max err {'t2': 1.414, 'h2': 1.489}
+B4 block 23: 82 neurons
+  after B4: all 0.506 digits [0.975, 0.791, 0.645, 0.973] story nll (50) 2.4546 replies same 15/30, teacher-forced top-1 agree 0.9883 reply nll 0.3948 (base 0.3922)
+edited test: all 0.506 digits [0.9746666666666667, 0.7906666666666666, 0.6446666666666667, 0.9733333333333334]
+side hard_plain: base 537 edit 544 of 600 (+13 / -6, p 0.17)
+side three: base 294 edit 294 of 300 (+0 / -0, p 1)
+side sub_big: base 278 edit 278 of 300 (+0 / -0, p 1)
+side reply: same 12 of 30
+generation (direct, 1000 new products): base 652 edit 496 gained 103 lost 259 p 1.3e-16; base replies with the x form: 984
+story nll base 2.4432 edit 2.4435

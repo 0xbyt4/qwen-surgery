@@ -1,0 +1,3 @@
+                              base: hard  90/120 lp  -6.65 cut 0 [mul3x2 8 add4 11 word2 14 linear2 20 mixed 19 sub_big 18] | math20 -1.887 held -3.112 text 2.4606
+neurons:21:2331,1002,569,2591,1073,1496,2435,2040,1470,2140,1601,2428,1452,2266,1837,1438: hard  19/120 lp  -9.23 cut 8 [mul3x2 5 add4 0 word2 8 linear2 4 mixed 2 sub_big 0] | math20 -3.740 held -6.460 text 2.4609
+neurons:21:118,212,463,642,1020,1046,1468,1522,1907,2171,2551,2658,2670,2828,3030,3038: hard  91/120 lp  -6.65 cut 3 [mul3x2 8 add4 11 word2 15 linear2 20 mixed 19 sub_big 18] | math20 -1.899 held -3.111 text 2.4615

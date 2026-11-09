@@ -1,0 +1,13 @@
+  after none: all 0.685 digits [0.973, 0.838, 0.807, 0.997] story nll (50) 2.4537
+B0 block 16: 78 neurons; ctx gap 0.490; smallest fit gaps [('a_u=4', 0.07029616886663059), ('a_u=7', 0.10108960931507394), ('a_u=9', 0.11120392225526948), ('a_u=3', 0.1158455081728037)]
+  after B0: all 0.669 digits [0.974, 0.827, 0.802, 0.996] story nll (50) 2.4539
+B1 readout max err {'a_t': 0.519, 'a_u': 0.555, 'b_t': 0.424, 'b_u': 0.498}
+B1 block 18: 880 neurons
+  after B1: all 0.001 digits [0.259, 0.098, 0.134, 0.305] story nll (50) 9.5063
+B2 readout max err {'P1u': 0.993, 'P1t': 0.99, 'P2u': 0.981, 'P2t': 0.978, 'U': 0.98}
+B2 block 20: 2056 neurons
+  after B2: all 0.000 digits [0.241, 0.105, 0.119, 0.312] story nll (50) 10.7186
+B3 readout max err {'t': 1.012, 'k': 1.027, 'K': 1.004, 'Xu': 0.991}
+B3 block 23: 1122 neurons
+edited test: all 0.000 digits [0.12533333333333332, 0.1, 0.10866666666666666, 0.19866666666666666]
+story nll base 2.4432 edit 12.3297

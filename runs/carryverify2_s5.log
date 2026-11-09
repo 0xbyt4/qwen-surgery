@@ -1,0 +1,29 @@
+  after none: all 0.685 digits [0.973, 0.838, 0.807, 0.997] story nll (50) 2.4537
+negative sequences: 270, tokens 35631
+B0 block 16: 78 neurons; ctx gap 0.222; smallest fit gaps [('a_u=4', 0.07029616886663059), ('a_u=7', 0.10108960931507394), ('a_u=9', 0.11120392225526948), ('a_u=3', 0.1158455081728037)]
+  after B0: all 0.645 digits [0.974, 0.825, 0.767, 0.995] story nll (50) 2.4573
+B1 in-context right p0.5 / wrong p99.5 / |other| max: {'a_t': (0.82, 0.06, 0.38), 'a_u': (0.77, 0.07, 0.56), 'b_t': (0.85, 0.08, 0.43), 'b_u': (0.78, 0.06, 0.45), 'ctx': (0.91, 0.12)}
+B1 readout max err {'a_t': 0.381, 'a_u': 0.555, 'b_t': 0.433, 'b_u': 0.447}
+B1 block 17: 880 neurons
+  after B1: all 0.583 digits [0.974, 0.819, 0.703, 0.991] story nll (50) 2.4573
+B2 in-context right p0.5 / wrong p99.5 / |other| max: {'P1u': (0.85, 0.07, 0.32), 'P1t': (0.84, 0.08, 0.4), 'P2u': (0.86, 0.07, 0.37), 'P2t': (0.87, 0.08, 0.31), 'U': (0.86, 0.08, 0.33), 'ctx': (0.9, 0.12)}
+B2 readout max err {'P1u': 0.888, 'P1t': 0.905, 'P2u': 0.481, 'P2t': 0.527, 'U': 0.807}
+B2 block 18: 2056 neurons
+  after B2: all 0.567 digits [0.974, 0.818, 0.673, 0.989] story nll (50) 2.4579
+B3 in-context right p0.5 / wrong p99.5 / |other| max: {'k': (0.79, 0.24, 0.46), 'K': (0.71, 0.15, 0.47), 'Xu': (0.81, 0.11, 0.43), 'ctx': (0.88, 0.17)}
+B3 readout max err {'k': 1.517, 'K': 0.891, 'Xu': 0.47}
+B3 block 19: 1080 neurons
+  after B3: all 0.575 digits [0.974, 0.807, 0.694, 0.991] story nll (50) 2.4579
+relay in-context right p0.5 / wrong p99.5 / |other| max: {'t': (0.32, 0.29, 0.78), 'h': (0.27, 0.51, 0.79), 'ctx': (0.79, 0.28)}
+relay readout max err {'t': 1.024, 'h': 1.442}
+relay block 21: 80 neurons
+B4 in-context right p0.5 / wrong p99.5 / |other| max: {'t2': (0.4, 0.34, 1.03), 'h2': (0.35, 0.53, 0.84), 'ctx': (0.76, 0.4)}
+B4 readout max err {'t2': 1.03, 'h2': 1.075}
+B4 block 23: 82 neurons
+edited test: all 0.858 digits [0.974, 0.9506666666666667, 0.944, 0.982]
+side hard_plain: base 537 edit 529 of 600 (+9 / -17, p 0.17)
+side three: base 294 edit 294 of 300 (+0 / -0, p 1)
+side sub_big: base 278 edit 273 of 300 (+1 / -6, p 0.12)
+side reply: same 6 of 30
+generation (direct, 1000 new products): base 652 edit 826 gained 233 lost 59 p 1.3e-25; base replies with the x form: 984
+story nll base 2.4432 edit 2.4467

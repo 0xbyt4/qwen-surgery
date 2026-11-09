@@ -1,0 +1,6 @@
+1319 questions
+Qwen3-0.6B-bf16                          707/1319 (0.536)  cut 4  tokens 160.8
+GPU out of memory; waiting
+Qwen3-0.6B-to125-down110-minus110        695/1319 (0.527)  cut 8  tokens 164.0
+GPU out of memory; waiting
+Qwen3-0.6B-to125                         682/1319 (0.517)  cut 5  tokens 162.0

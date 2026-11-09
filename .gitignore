@@ -1,5 +1,6 @@
 models/
-runs/
+runs/*
+!runs/*.log
 __pycache__/
 .venv/
 .ruff_cache/

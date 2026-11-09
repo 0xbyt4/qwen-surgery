@@ -1,0 +1,25 @@
+fit sequences 3266 (templates [300 267 300 293 232 297 279 262 390 230 266 150]), held [323, 266]; missing [{'templates': ['What is {a} * {b}?', 'Compute {a} * {b}.', 'What is {a} times {b}?', 'Find {a} x {b}.', 'How much is {a} multiplied by {b}?', 'Work out {a} × {b}.', 'Please multiply {a} and {b}.', 'Give me {a} * {b}.'], 'mode': 'direct', 'missing': [0, 33, 0, 7, 68, 3, 21, 38]}, {'templates': ['A school has {a} classes with {b} students in each class. How many students are there?', 'A shop sells {a} bags of rice each day. How many bags does it sell in {b} days?', 'Each crate has {a} bottles. How many bottles are in {b} crates?', 'Each bus carries {a} people. How many people do {b} buses carry?'], 'mode': 'plain', 'missing': [10, 170, 134, 250]}, {'templates': ['Calculate {a} × {b}.', '{a} times {b} = ?', 'Multiply {a} by {b}.', 'What is the product of {a} and {b}?'], 'mode': 'direct', 'missing': [22, 0, 27, 28]}, {'templates': ['A box holds {a} pencils. How many pencils are in {b} boxes?', 'A theater has {a} rows with {b} seats in each row. How many seats are there in all?', 'Tom reads {a} pages a day for {b} days. How many pages does he read?', 'Each ticket costs {a} dollars. How much do {b} tickets cost?'], 'mode': 'plain', 'missing': [28, 6, 100, 0]}]
+  after none: all 0.682 digits [0.971, 0.837, 0.803, 0.997] story nll (50) 2.4537 replies same 30/30, teacher-forced top-1 agree 1.0000 reply nll 0.3922 (base 0.3922); held templates all four digits {'direct': 0.641, 'word': 0.767}, per digit {'direct': [0.975, 0.833, 0.78, 0.997], 'word': [0.981, 0.876, 0.88, 1.0]}
+negative sequences: 300, tokens 38491
+C block 19: ctx gap -0.210
+  after C: all 0.690 digits [0.971, 0.844, 0.805, 0.999] story nll (50) 2.4537 replies same 30/30, teacher-forced top-1 agree 1.0000 reply nll 0.3922 (base 0.3922); held templates all four digits {'direct': 0.638, 'word': 0.797}, per digit {'direct': [0.975, 0.842, 0.765, 0.997], 'word': [0.981, 0.929, 0.857, 1.0]}
+B0 block 20: 76 neurons; smallest fit gaps [('ctx', -0.21003029649779847), ('a_u=7', -0.06440525329373553), ('a_t=8', -0.013667309350939294), ('b_u=7', 0.006631247067338308)]
+  after B0: all 0.683 digits [0.973, 0.849, 0.795, 0.997] story nll (50) 2.4549 replies same 13/30, teacher-forced top-1 agree 0.9854 reply nll 0.3935 (base 0.3922); held templates all four digits {'direct': 0.616, 'word': 0.763}, per digit {'direct': [0.978, 0.83, 0.74, 0.997], 'word': [0.981, 0.91, 0.835, 1.0]}
+B1 in-context right p0.5 / wrong p99.5 / |other| max: {'a_t': (0.66, 0.18, 0.95), 'a_u': (0.66, 0.43, 1.05), 'b_t': (0.75, 0.23, 0.9), 'b_u': (0.68, 0.42, 0.97), 'ctx': (0.79, 0.34)}
+B1 readout max err {'a_t': 0.947, 'a_u': 1.055, 'b_t': 0.899, 'b_u': 0.969}
+B1 block 21: 880 neurons
+  after B1: all 0.656 digits [0.973, 0.835, 0.775, 0.996] story nll (50) 2.4549 replies same 10/30, teacher-forced top-1 agree 0.9840 reply nll 0.3940 (base 0.3922); held templates all four digits {'direct': 0.594, 'word': 0.737}, per digit {'direct': [0.978, 0.836, 0.728, 0.994], 'word': [0.981, 0.914, 0.82, 1.0]}
+B2 in-context right p0.5 / wrong p99.5 / |other| max: {'P1u': (0.63, 0.48, 1.48), 'P1t': (0.65, 0.4, 1.12), 'P2u': (0.62, 0.41, 1.02), 'P2t': (0.66, 0.41, 0.99), 'U': (0.59, 0.48, 1.15), 'ctx': (0.79, 0.3)}
+B2 readout max err {'P1u': 1.476, 'P1t': 1.125, 'P2u': 1.025, 'P2t': 0.994, 'U': 1.15}
+B2 block 22: 2056 neurons
+  after B2: all 0.654 digits [0.973, 0.832, 0.773, 0.995] story nll (50) 2.4548 replies same 9/30, teacher-forced top-1 agree 0.9816 reply nll 0.3951 (base 0.3922); held templates all four digits {'direct': 0.588, 'word': 0.654}, per digit {'direct': [0.978, 0.817, 0.728, 0.994], 'word': [0.981, 0.872, 0.744, 1.0]}
+B3 in-context right p0.5 / wrong p99.5 / |other| max: {'k': (0.54, 0.65, 0.86), 'K': (0.59, 0.64, 1.55), 'Xu': (0.62, 0.41, 1.36), 'ctx': (0.76, 0.41)}
+B3 readout max err {'k': 3.074, 'K': 1.552, 'Xu': 1.358}
+B3 block 23: 1080 neurons
+  after B3: all 0.654 digits [0.973, 0.828, 0.776, 0.996] story nll (50) 2.4549 replies same 8/30, teacher-forced top-1 agree 0.9845 reply nll 0.3966 (base 0.3922); held templates all four digits {'direct': 0.591, 'word': 0.583}, per digit {'direct': [0.978, 0.814, 0.743, 0.994], 'word': [0.981, 0.812, 0.707, 1.0]}
+B4 in-context right p0.5 / wrong p99.5 / |other| max: {'t': (0.18, 0.76, 1.57), 'h': (0.14, 0.76, 1.41), 'ctx': (0.72, 0.46)}
+B4 readout max err {'t': 1.567, 'h': 1.405}
+B4 block 24: 82 neurons
+  after B4: all 0.820 digits [0.973, 0.924, 0.92, 0.993] story nll (50) 2.4549 replies same 8/30, teacher-forced top-1 agree 0.9791 reply nll 0.4001 (base 0.3922); held templates all four digits {'direct': 0.755, 'word': 0.594}, per digit {'direct': [0.978, 0.882, 0.892, 0.981], 'word': [0.981, 0.793, 0.744, 1.0]}
+edited test: all 0.820 digits [0.9726666666666667, 0.924, 0.92, 0.9933333333333333]
+story nll base 2.4432 edit 2.4440

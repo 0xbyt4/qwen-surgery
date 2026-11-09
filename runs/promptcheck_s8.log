@@ -1,0 +1,1 @@
+Qwen3-0.6B-bf16                          plain   {'all': 537, 'kinds': {'mul3x2': 99, 'add4': 91, 'word2': 53, 'linear2': 100, 'mixed': 99, 'sub_big': 95}, 'cut': 1, 'mean_tokens': 156.51333333333332}

@@ -1,0 +1,8 @@
+                              base: hard  94/120 lp  -6.24 cut 2 [mul3x2 7 add4 11 word2 17 linear2 20 mixed 20 sub_big 19] | math20 -1.887 held -3.112 text 2.4606
+nfile:runs/neurons20.json:top16*1.5: hard  94/120 lp  -6.26 cut 1 [mul3x2 9 add4 10 word2 16 linear2 20 mixed 19 sub_big 20] | math20 -1.578 held -3.042 text 2.4603
+ nfile:runs/neurons20.json:top16*2: hard  90/120 lp  -6.68 cut 2 [mul3x2 8 add4 11 word2 16 linear2 20 mixed 17 sub_big 18] | math20 -1.578 held -2.995 text 2.4604
+ nfile:runs/neurons20.json:top16*3: hard  78/120 lp  -7.77 cut 0 [mul3x2 7 add4 8 word2 16 linear2 18 mixed 13 sub_big 16] | math20 -2.000 held -3.437 text 2.4621
+nfile:runs/neurons20.json:top64*1.5: hard  91/120 lp  -6.30 cut 0 [mul3x2 7 add4 9 word2 16 linear2 20 mixed 20 sub_big 19] | math20 -1.475 held -3.067 text 2.4603
+ nfile:runs/neurons20.json:top64*2: hard  81/120 lp  -6.90 cut 2 [mul3x2 4 add4 5 word2 16 linear2 19 mixed 20 sub_big 17] | math20 -1.843 held -3.064 text 2.4610
+nfile:runs/neurons20.json:bottom64: hard  83/120 lp  -7.35 cut 0 [mul3x2 8 add4 18 word2 14 linear2 13 mixed 17 sub_big 13] | math20 -1.310 held -2.660 text 2.4648
+nfile:runs/neurons22.json:bottom256: hard  93/120 lp  -6.66 cut 3 [mul3x2 6 add4 17 word2 17 linear2 17 mixed 17 sub_big 19] | math20 -1.371 held -2.958 text 2.4806

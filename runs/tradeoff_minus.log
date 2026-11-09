@@ -1,0 +1,4 @@
+seed 3: add4 of 200, mul2x2 of 300, mul3x2 of 200
+out:1249*1.25+out:1495*1.1               add4  188  mul2x2  218  mul3x2  165
+out:1249*1.25+out:1495*1.1+out:481*1.1   add4  188  mul2x2  216  mul3x2  165
+out:1249*1.25+out:1495*1.1+out:481*1.2   add4  188  mul2x2  214  mul3x2  165

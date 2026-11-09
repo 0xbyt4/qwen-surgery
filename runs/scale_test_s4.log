@@ -1,0 +1,7 @@
+                              base: hard  84/120 lp  -6.48 cut 4 [mul3x2 3 add4 11 word2 12 linear2 20 mixed 19 sub_big 19] | math20 -1.887 held -3.112 text 2.4606
+           head:20:12,13,14,15*1.5: hard  88/120 lp  -6.35 cut 3 [mul3x2 3 add4 15 word2 11 linear2 20 mixed 20 sub_big 19] | math20 -1.805 held -2.732 text 2.4665
+       head:20:7,8,12,13,14,15*1.5: hard  87/120 lp  -6.21 cut 3 [mul3x2 2 add4 16 word2 10 linear2 20 mixed 20 sub_big 19] | math20 -1.794 held -2.612 text 2.4686
+       head:20:0,1,2,3,4,5,9,10,11: hard  92/120 lp  -6.35 cut 2 [mul3x2 6 add4 19 word2 10 linear2 19 mixed 20 sub_big 18] | math20 -2.017 held -2.567 text 2.4950
+              head:20:0,3,5,10*1.5: hard  85/120 lp  -6.51 cut 6 [mul3x2 3 add4 11 word2 13 linear2 20 mixed 19 sub_big 19] | math20 -1.891 held -3.187 text 2.4664
+          head:20:1,2,4,6,9,11*1.5: hard  90/120 lp  -6.64 cut 2 [mul3x2 4 add4 12 word2 16 linear2 20 mixed 19 sub_big 19] | math20 -2.010 held -3.321 text 2.4718
+              head:17:0,3,5,10*1.5: hard  81/120 lp  -6.46 cut 5 [mul3x2 2 add4 12 word2 10 linear2 20 mixed 18 sub_big 19] | math20 -2.045 held -3.265 text 2.4626

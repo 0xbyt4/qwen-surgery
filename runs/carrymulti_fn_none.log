@@ -1,0 +1,35 @@
+fit sequences 5161 (templates [300 267 300 293 232 297 279 262 193 197 200 200 198 179 184 153 121 169
+ 176 197 366 398]), held [323, 396]; missing [{'templates': ['What is {a} * {b}?', 'Compute {a} * {b}.', 'What is {a} times {b}?', 'Find {a} x {b}.', 'How much is {a} multiplied by {b}?', 'Work out {a} × {b}.', 'Please multiply {a} and {b}.', 'Give me {a} * {b}.'], 'mode': 'direct', 'missing': [0, 33, 0, 7, 68, 3, 21, 38]}, {'templates': ['A school has {a} classes with {b} students in each class. How many students are there?', 'A shop sells {a} bags of rice each day. How many bags does it sell in {b} days?', 'Each crate has {a} bottles. How many bottles are in {b} crates?', 'Each bus carries {a} people. How many people do {b} buses carry?', 'A baker makes {a} cookies every hour. How many cookies does she make in {b} hours?', 'A garden has {a} rows of flowers with {b} flowers in each row. How many flowers are in the garden?', 'Each jar holds {a} candies. How many candies are in {b} jars?', 'A worker earns {a} dollars per day. How much does he earn in {b} days?', 'There are {a} baskets and each basket contains {b} eggs. How many eggs are there in total?', 'A parking garage has {a} levels with {b} cars on each level. How many cars are parked?', 'Each pack holds {a} cards. How many cards are in {b} packs?', 'A train has {a} cars and each car seats {b} passengers. How many passengers can the train seat?'], 'mode': 'plain', 'missing': [7, 3, 0, 0, 2, 21, 16, 47, 79, 31, 24, 3]}, {'templates': ["What's {a} × {b}?", 'Can you work out {a} * {b}?'], 'mode': 'plain', 'missing': [34, 2]}, {'templates': ['Calculate {a} × {b}.', '{a} times {b} = ?', 'Multiply {a} by {b}.', 'What is the product of {a} and {b}?'], 'mode': 'direct', 'missing': [14, 0, 24, 39]}, {'templates': ['A box holds {a} pencils. How many pencils are in {b} boxes?', 'A theater has {a} rows with {b} seats in each row. How many seats are there in all?', 'Tom reads {a} pages a day for {b} days. How many pages does he read?', 'Each ticket costs {a} dollars. How much do {b} tickets cost?'], 'mode': 'plain', 'missing': [4, 0, 0, 0]}]
+  after none: all 0.674 digits [0.971, 0.839, 0.797, 0.998] story nll (50) 2.4537 replies same 30/30, teacher-forced top-1 agree 1.0000 reply nll 0.3922 (base 0.3922); held templates all four digits {'direct': 0.656, 'word': 0.725}, per digit {'direct': [0.96, 0.864, 0.793, 1.0], 'word': [0.985, 0.838, 0.854, 0.997], 'by template': {'direct': [0.6, 0.64, 0.72, 0.67], 'word': [0.74, 0.84, 0.56, 0.76]}}
+negative sequences: 300, tokens 38491
+C block 19: ctx gap -0.523
+  after C: all 0.651 digits [0.971, 0.837, 0.772, 0.997] story nll (50) 2.4537 replies same 30/30, teacher-forced top-1 agree 1.0000 reply nll 0.3922 (base 0.3922); held templates all four digits {'direct': 0.625, 'word': 0.672}, per digit {'direct': [0.96, 0.833, 0.774, 0.997], 'word': [0.985, 0.808, 0.833, 0.997], 'by template': {'direct': [0.59, 0.64, 0.64, 0.62], 'word': [0.66, 0.78, 0.54, 0.71]}}
+B0 block 20: 76 neurons; smallest fit gaps [('ctx', -0.5231104675960192), ('b_t=4', -0.36245960171140673), ('b_u=7', -0.33042509616310295), ('a_u=3', -0.3168271488586136)]
+  after B0: all 0.565 digits [0.971, 0.819, 0.679, 0.991] story nll (50) 2.4560 replies same 9/30, teacher-forced top-1 agree 0.9786 reply nll 0.3955 (base 0.3922); held templates all four digits {'direct': 0.529, 'word': 0.475}, per digit {'direct': [0.96, 0.793, 0.653, 0.991], 'word': [0.985, 0.677, 0.712, 0.985], 'by template': {'direct': [0.52, 0.58, 0.5, 0.49], 'word': [0.51, 0.48, 0.35, 0.56]}}
+B1 in-context right p0.5 / wrong p99.5 / |other| max: {'a_t': (0.41, 0.36, 1.14), 'a_u': (0.39, 0.49, 1.5), 'b_t': (0.48, 0.58, 1.43), 'b_u': (0.36, 0.64, 1.21), 'ctx': (0.36, 0.39)}
+B1 readout max err {'a_t': 1.301, 'a_u': 1.502, 'b_t': 1.433, 'b_u': 1.206}
+B1 block 21: 880 neurons
+  after B1: all 0.468 digits [0.971, 0.772, 0.597, 0.987] story nll (50) 2.4560 replies same 10/30, teacher-forced top-1 agree 0.9757 reply nll 0.3986 (base 0.3922); held templates all four digits {'direct': 0.409, 'word': 0.429}, per digit {'direct': [0.96, 0.737, 0.567, 0.969], 'word': [0.985, 0.702, 0.581, 0.965], 'by template': {'direct': [0.43, 0.41, 0.43, 0.34], 'word': [0.42, 0.52, 0.33, 0.45]}}
+B2 in-context right p0.5 / wrong p99.5 / |other| max: {'P1u': (0.13, 0.83, 0.94), 'P1t': (0.18, 0.78, 0.95), 'P2u': (0.12, 0.86, 1.4), 'P2t': (0.14, 0.84, 1.39), 'U': (0.15, 0.79, 1.32), 'ctx': (0.3, 0.29)}
+B2 readout max err {'P1u': 1.408, 'P1t': 1.567, 'P2u': 1.403, 'P2t': 1.405, 'U': 1.478}
+B2 block 22: 2056 neurons
+  after B2: all 0.473 digits [0.971, 0.78, 0.595, 0.983] story nll (50) 2.4560 replies same 10/30, teacher-forced top-1 agree 0.9777 reply nll 0.3984 (base 0.3922); held templates all four digits {'direct': 0.477, 'word': 0.389}, per digit {'direct': [0.96, 0.746, 0.607, 0.966], 'word': [0.985, 0.674, 0.558, 0.977], 'by template': {'direct': [0.53, 0.49, 0.43, 0.43], 'word': [0.4, 0.46, 0.24, 0.46]}}
+B3 in-context right p0.5 / wrong p99.5 / |other| max: {'k': (0.25, 0.79, 1.36), 'K': (0.1, 0.9, 1.14), 'Xu': (0.17, 0.74, 1.63), 'ctx': (0.3, 0.36)}
+B3 readout max err {'k': 1.551, 'K': 1.509, 'Xu': 1.626}
+B3 block 23: 1080 neurons
+  after B3: all 0.479 digits [0.971, 0.772, 0.601, 0.982] story nll (50) 2.4564 replies same 11/30, teacher-forced top-1 agree 0.9772 reply nll 0.3984 (base 0.3922); held templates all four digits {'direct': 0.452, 'word': 0.407}, per digit {'direct': [0.96, 0.731, 0.604, 0.963], 'word': [0.985, 0.707, 0.543, 0.977], 'by template': {'direct': [0.48, 0.48, 0.43, 0.39], 'word': [0.43, 0.49, 0.26, 0.45]}}
+B4 in-context right p0.5 / wrong p99.5 / |other| max: {'t': (-0.09, 0.97, 1.05), 'h': (-0.0, 0.89, 1.04), 'ctx': (0.31, 0.42)}
+B4 readout max err {'t': 1.669, 'h': 1.562}
+B4 block 24: 82 neurons
+  after B4: all 0.780 digits [0.971, 0.923, 0.883, 0.982] story nll (50) 2.4562 replies same 11/30, teacher-forced top-1 agree 0.9748 reply nll 0.3994 (base 0.3922); held templates all four digits {'direct': 0.693, 'word': 0.581}, per digit {'direct': [0.96, 0.861, 0.845, 0.96], 'word': [0.985, 0.836, 0.72, 0.97], 'by template': {'direct': [0.72, 0.68, 0.67, 0.7], 'word': [0.62, 0.74, 0.48, 0.48]}}
+edited test: all 0.780 digits [0.9706666666666667, 0.9226666666666666, 0.8826666666666667, 0.982]
+general plain (edit): 262 of 400
+general phrasings (edit): 249 of 400
+general word (edit): 227 of 400
+general gsm8k (edit): 237 of 400
+general plain (plain): base 335 edit 262 of 400 (+5 / -78, p 6.4e-18)
+general phrasings (direct): base 269 edit 249 of 400 (+64 / -84, p 0.12)
+general word (plain): base 290 edit 227 of 400 (+46 / -109, p 4.5e-07)
+general gsm8k (plain): base 229 edit 237 of 400 (+23 / -15, p 0.26)
+generation (direct, 1000 new products): base 651 edit 770 gained 224 lost 105 p 4.8e-11; base replies with the x form: 985
+story nll base 2.4432 edit 2.4450
