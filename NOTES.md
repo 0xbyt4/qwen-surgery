@@ -1123,6 +1123,66 @@ compute the hundreds and tens digit of A * B and write them into the logits.
   base model's own right replies, teacher forced), then test on held-out
   templates; the remaining chat drift; the thousands digit.
 
+## 28. The carry circuit on many prompt templates (`carrydata.py`, `carrygate.py`, `carrybuild.py`, `runs/carrygate*.log`, `runs/carrymulti*.log`)
+
+Goal: make the hand-written circuit of section 27 work on prompts it was
+not fit on. Fit data: teacher-forced sequences from the base model's own
+replies, cut after the line "X × Y = " (or "X \times Y = ") and completed
+with the right product (`carrydata.py`). Fit templates: 8 direct phrasings
+and 12 word problems; held-out templates (never fit): the 4 phrasings and 4
+word problems of `--general`.
+
+- Literature (quick search, not complete): Tracr-Injection (ACL 2025
+  Findings) puts compiled algorithms into a pretrained model with
+  fine-tuning; Qwenputer (developer project, self-reported) puts a compiled
+  CPU into Qwen3.5-4B as 11 untrained layers in front of the model. Neither
+  adds neurons inside the model's own MLPs that read its states and repair
+  one step of its own computation.
+- Which readout breaks (`carrygate.py`, fit on one template or on many,
+  tested on held-out templates):
+  - The context readout holds everywhere (held positives below the fit
+    threshold 0%, held negatives above it 0 to 0.7%).
+  - The operand-digit readouts break. Fit on one template, they read 15 to
+    68% right on held templates at blocks 15 to 16. Fit on many templates,
+    held direct phrasings: 78 to 92% at blocks 15 to 18, 98.5 to 99.8% at
+    block 20, falling again after block 21 (75 to 90% at block 24). Block 20
+    attention fetches the operand digits (section 9); after it, they are
+    held in a form that does not depend on the prompt.
+- So the circuit moved to blocks 19 (context), 20 (operand flags), 21 to 23
+  (products, carries), 24 (digit write), with no relay.
+- Flag size: the residual rms is 2.0 at block 16 and 6 to 9.5 at blocks 21
+  to 24, so a flag of size 16 is 3 to 4 times weaker there. alpha 8: the
+  flags cannot be read at block 24 (teacher forced 0.68 to 0.46); alpha 16:
+  noisy; alpha 32: best; alpha 48: more damage, no gain.
+- Stage trace on held word problems (alpha 32, 4 word templates): the error
+  starts at the operand flags (90 to 96% against 98 to 99.5% on held
+  phrasings) and grows over the stages (t and h 69 to 72%). With 12 word
+  templates the operand flags read 95 to 99% and t and h 87 to 88%.
+- Result, alpha 32, 12 word templates (`runs/carrymulti_w12_gen.log`, all
+  paired):
+  - Fit template, generation, 1000 new products (seed 5): 642 to 907
+    right, 294 gained / 29 lost, p = 2e-56 (the old circuit: 652 to 865).
+    Teacher forced: all four digits 0.675 to 0.931 (hundreds 0.985, tens
+    0.975).
+  - Held phrasings, generation: 269 to 294 (+84 / -59, p = 0.044); teacher
+    forced 0.611 to 0.780. The circuit fit on one template gave 31 here.
+  - Held word problems, generation: 284 to 210 (+35 / -109, p = 5e-10);
+    teacher forced 0.782 to 0.742.
+  - "What is A * B?" with the plain prompt: 336 to 309 (+4 / -31).
+  - GSM8K 400 plain: 229 to 236 (p = 0.3). Hard set plain 537 to 526
+    (p = 0.052), three numbers 294 to 292, big subtraction 278 to 278.
+    Story loss 2.4432 to 2.4447; chat top-1 agreement 0.979.
+- Why word problems still lose: 76 of 109 lost replies write the product
+  in a form not in the fit data, such as "67 \, \text{pages/day} \times
+  36 \, \text{days} = ". The context readout fires there, but the operand
+  readout was never fit on it, so the circuit writes wrong digits ("368",
+  "243"). The one held template with this form ("Tom reads ...") gave no
+  teacher-forced sequences, so the trace did not see it.
+- Open: the circuit must stay silent where it cannot read the operands
+  (fit such forms as negatives of the context, or fit them as positives
+  with the right operands, or gate the write on exactly one operand flag
+  per digit); the plain-prompt loss; chat drift.
+
 ## Observations
 
 A running list of things noticed during the work, with the evidence for each.

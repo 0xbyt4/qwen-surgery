@@ -1,7 +1,8 @@
 """Add hand-written neurons that compute the hundreds and tens digit of A * B.
 
 No training. The model already holds the four operand digits at the answer
-positions (opprobe.py: read 99-100% after blocks 15 to 20), but not the
+positions (opprobe.py: read 99-100% after blocks 15 to 20; carrygate.py: on
+prompt templates outside the fit only from block 20 on), but not the
 carry. New MLP neurons compute the digits with the school method, and every
 value between the steps is a one-hot flag (0 or 1) in its own new residual
 direction, so errors do not add up from step to step:
@@ -11,21 +12,23 @@ direction, so errors do not add up from step to step:
   S2 = P1 % 10 + P2 % 10 + U        tens digit t = S2 % 10, k = S2 // 10
   K = P1 // 10 + P2 // 10           hundreds digit h = (X % 10 + K + k) % 10
 
-Stages (each is new neurons in the MLP of one block):
-  B0 (block 16): flags of a_t, a_u, b_t, b_u (40 flags) and a context flag
-            (1 only at the hundreds and tens answer positions). A linear
+Stages (each is new neurons in the MLP of one block; default blocks):
+  C (block 19): a context flag (1 only at the hundreds and tens answer
+            positions).
+  B0 (block 20): flags of a_t, a_u, b_t, b_u (40 flags), times the context
+            flag. A linear
             readout of the model state always ranks the right digit first,
             but one threshold for all values does not separate it; one
             threshold per value does.
-  B1 (block 17): one AND neuron pair per digit pair (a_t = i, b_u = j)
+  B1 (block 21): one AND neuron pair per digit pair (a_t = i, b_u = j)
             writes the flags of P1 % 10 and P1 // 10, and so on for P2, U
             and X % 10.
-  B2 (block 18): AND over (P1 % 10, P2 % 10, U) writes the flags of t and k;
+  B2 (block 22): AND over (P1 % 10, P2 % 10, U) writes the flags of t and k;
             AND over (P1 // 10, P2 // 10) writes the flags of K.
-  B3 (block 19): AND over (X % 10, K, k) writes the flag of h.
-  relay (block 21): reads t and h and writes them again, fresh, into new
-            directions (a flag fades over several blocks).
-  B4 (block 23): t at the tens position and h at the hundreds position add
+  B3 (block 23): AND over (X % 10, K, k) writes the flag of h.
+  relay (--relay, off by default): reads t and h and writes them again,
+            fresh, into new directions (a flag fades over several blocks).
+  B4 (block 24): t at the tens position and h at the hundreds position add
             the logit direction of that digit.
 Each stage erases the flags it read for the last time. Flags sit in
 residual directions that the later blocks read and write least.
@@ -37,8 +40,10 @@ input. A clamp to [0, 1] uses two neurons: (silu(beta z) - silu(beta z - S))
 The only fitted parts are linear readouts (closed-form ridge, no gradient)
 of what the model or the new neurons hold: the operand digits, the flags, a
 constant, the context (product answer position against story text) and the
-answer position. Fits use the fit products (seed 2) and stories 0-99; the
-score uses new products (seed 3, none in the fit set) and stories 100-199.
+answer position. Fits use teacher-forced product sequences in many prompt
+templates (carrydata.FIT_*, pairs of seed 2; --one-template: only "What is
+A * B?") and stories 0-99. Scores use new products (seed 3, "What is A *
+B?"), held-out templates (carrydata.HELD_*, seed 21) and stories 100-199.
 
 Example:
     uv run python carrybuild.py --gen 1000
@@ -54,6 +59,7 @@ import mlx.core as mx
 import numpy as np
 from mlx_lm import batch_generate, load
 
+import carrydata as cd
 from carrycollect import mlp_inputs
 from circuit import run_blocks
 from evalmath import DEFAULT_MODEL, ROOT, prompt_ids, run
@@ -95,35 +101,6 @@ def ridge(
     x = x.astype(np.float64)
     xw = x if weight is None else x * weight[:, None]
     return np.linalg.solve(xw.T @ x + lam * np.eye(x.shape[1]), xw.T @ y)
-
-
-def product_inputs(model, tok, pairs, block: int, chunk: int = 250) -> np.ndarray:
-    """MLP input of block at the four answer positions: [N, 4, d]."""
-    x, first = reply_ids(tok, [tuple(p) for p in pairs])
-    pos = mx.arange(first - 1, first - 1 + WIDTH)
-    out = []
-    for i in range(0, len(pairs), chunk):
-        n = mlp_inputs(model, x[i : i + chunk], [block])[block]
-        out.append(np.array(n[:, pos].astype(mx.float32)))
-    return np.concatenate(out)
-
-
-def other_inputs(model, tok, pairs, block: int, chunk: int = 100) -> np.ndarray:
-    """MLP input of block at every position of the product sequences except
-    the hundreds and tens answer positions: [M, d]."""
-    x, first = reply_ids(tok, [tuple(p) for p in pairs])
-    keep = [
-        i
-        for i in range(x.shape[1])
-        if i not in (first - 1 + HUNDREDS, first - 1 + TENS)
-    ]
-    out = []
-    for i in range(0, len(pairs), chunk):
-        n = mlp_inputs(model, x[i : i + chunk], [block])[block]
-        out.append(
-            np.array(n[:, mx.array(keep)].astype(mx.float32)).reshape(-1, n.shape[-1])
-        )
-    return np.concatenate(out)
 
 
 def story_inputs(model, tok, block: int, lines: list[str], max_tokens=256):
@@ -244,10 +221,20 @@ class Stage:
     readouts and a constant are fit on all of these states."""
 
     def __init__(
-        self, model, tok, fit, block, story_lines, y, neg, n_other=400
+        self,
+        model,
+        tok,
+        seqs: cd.Seqs,
+        block,
+        story_lines,
+        y,
+        neg,
+        n_other=400,
+        held: dict | None = None,
     ) -> None:
-        n = product_inputs(model, tok, fit, block)
-        other = other_inputs(model, tok, fit[:n_other], block)
+        n = cd.answer_states(model, seqs, block)
+        spread = np.linspace(0, len(seqs) - 1, n_other).astype(int)
+        other = cd.other_states(model, seqs.subset(spread), block)
         st = np.concatenate(
             [
                 story_inputs(model, tok, block, story_lines),
@@ -267,6 +254,10 @@ class Stage:
             TENS: ridge(self.all, (is_ctx - is_h)[:, None])[:, 0],
         }
         self.y = y
+        self.held: dict[str, tuple[np.ndarray, dict]] = {}
+        for k, q in (held or {}).items():
+            hs = cd.answer_states(model, q, block)[:, [HUNDREDS, TENS]]
+            self.held[k] = (hs.reshape(-1, hs.shape[-1]), variables(q.pairs))
         g = model.model.layers[block].post_attention_layernorm.weight
         self.g = np.array(g.astype(mx.float32))
 
@@ -419,6 +410,12 @@ def readouts(st: Stage, names: list[str], log: dict, tag: str) -> dict:
         round(float(np.percentile(ctx_in, 0.5)), 2),
         round(float(np.percentile(ctx_out, 99.9)), 2),
     )
+    for k, (hs, hy) in st.held.items():
+        acc = {
+            n: round(float(((hs @ out[n]).argmax(1) == np.repeat(hy[n], 2)).mean()), 3)
+            for n in names
+        }
+        stats[f"held {k} argmax"] = acc
     log.setdefault("readout_stats", {})[tag] = stats
     print(
         f"{tag} in-context right p0.5 / wrong p99.5 / |other| max:", stats, flush=True
@@ -551,10 +548,14 @@ def sign_p(gained: int, lost: int) -> float:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--model", default=str(DEFAULT_MODEL))
-    p.add_argument("--blocks", default="16,17,18,19,23")
-    p.add_argument("--alpha", type=float, default=16.0, help="flag size")
+    p.add_argument("--blocks", default="20,21,22,23,24")
+    p.add_argument("--alpha", type=float, default=32.0, help="flag size")
     p.add_argument("--margin", type=float, default=15.0)
-    p.add_argument("--n-fit", type=int, default=3000)
+    p.add_argument("--n-fit", type=int, default=2400, help="direct fit pairs")
+    p.add_argument("--n-word", type=int, default=2400, help="word fit pairs")
+    p.add_argument("--n-held", type=int, default=400)
+    p.add_argument("--one-template", action="store_true", help="old fit set")
+    p.add_argument("--trace", action="store_true", help="readouts on held templates")
     p.add_argument("--n-test", type=int, default=1500)
     p.add_argument("--name", default="carrybuild")
     p.add_argument("--debug", action="store_true")
@@ -564,16 +565,68 @@ def main() -> None:
     p.add_argument(
         "--general", action="store_true", help="score other forms of the task"
     )
-    p.add_argument("--relay", type=int, default=21, help="relay block; -1: none")
-    p.add_argument("--ctx-block", type=int, default=15)
+    p.add_argument("--relay", type=int, default=-1, help="relay block; -1: none")
+    p.add_argument("--ctx-block", type=int, default=19)
     a = p.parse_args()
 
     b0, b1, b2, b3, b4 = (int(x) for x in a.blocks.split(","))
     model, tok = load(a.model)
     s = Surgeon(model)
-    fit = np.array(mul2x2(a.n_fit, 2))
+    fit = np.array(mul2x2(a.n_fit + a.n_word, 2))
     test = np.array(mul2x2(a.n_test, 3, exclude={tuple(x) for x in fit}))
-    y = variables(fit)
+    held_pairs = mul2x2(2 * a.n_held, 21, exclude={tuple(x) for x in fit})
+    data_log: dict = {}
+    if a.one_template:
+        seqs = cd.collect(
+            model, tok, fit[: a.n_fit], cd.FIT_DIRECT[:1], "direct", 64, 100, data_log
+        )
+    else:
+        seqs = cd.concat(
+            [
+                cd.collect(
+                    model,
+                    tok,
+                    fit[: a.n_fit],
+                    cd.FIT_DIRECT,
+                    "direct",
+                    64,
+                    100,
+                    data_log,
+                ),
+                cd.collect(
+                    model, tok, fit[a.n_fit :], cd.FIT_WORD, "plain", 200, 50, data_log
+                ),
+            ],
+            [0, len(cd.FIT_DIRECT)],
+        )
+    held = {
+        "direct": cd.collect(
+            model,
+            tok,
+            held_pairs[: a.n_held],
+            cd.HELD_DIRECT,
+            "direct",
+            64,
+            100,
+            data_log,
+        ),
+        "word": cd.collect(
+            model,
+            tok,
+            held_pairs[a.n_held :],
+            cd.HELD_WORD,
+            "plain",
+            200,
+            50,
+            data_log,
+        ),
+    }
+    print(
+        f"fit sequences {len(seqs)} (templates {np.bincount(seqs.template)}), "
+        f"held {[len(q) for q in held.values()]}; missing {data_log['missing']}",
+        flush=True,
+    )
+    y = variables(seqs.pairs)
     lines = (ROOT / "data" / "stories.jsonl").read_text().splitlines()
     fit_lines, test_lines = lines[:100], lines[100:200]
     texts = [json.loads(x)["text"] for x in test_lines]
@@ -598,6 +651,18 @@ def main() -> None:
         same = sum(x == z for x, z in zip(rep, base_replies, strict=True))
         top, rnll = reply_fit(model, tok, base_seqs)
         agree = float((top == base_fit[0]).mean())
+        held_right = {k: cd.answer_right(model, tok, q) for k, q in held.items()}
+        held_all = {k: round(float(r.all(1).mean()), 3) for k, r in held_right.items()}
+        held_digits = {
+            k: [round(float(x), 3) for x in r.mean(0)] for k, r in held_right.items()
+        }
+        held_digits["by template"] = {
+            k: [
+                round(float(r[held[k].template == j].all(1).mean()), 2)
+                for j in range(held[k].template.max() + 1)
+            ]
+            for k, r in held_right.items()
+        }
         log["stages"][tag] = {
             "all": all_,
             "digits": digits,
@@ -605,12 +670,15 @@ def main() -> None:
             "reply_same": same,
             "reply_top1_agree": agree,
             "reply_nll": rnll,
+            "held_all": held_all,
+            "held_digits": held_digits,
         }
         print(
             f"  after {tag}: all {all_:.3f} digits "
             f"{[round(d, 3) for d in digits]} story nll (50) {nll:.4f} "
             f"replies same {same}/{len(rep)}, teacher-forced top-1 agree "
-            f"{agree:.4f} reply nll {rnll:.4f} (base {base_fit[1]:.4f})",
+            f"{agree:.4f} reply nll {rnll:.4f} (base {base_fit[1]:.4f}); held "
+            f"templates all four digits {held_all}, per digit {held_digits}",
             flush=True,
         )
 
@@ -619,7 +687,9 @@ def main() -> None:
     print(f"negative sequences: {len(neg)}, tokens {sum(map(len, neg))}", flush=True)
 
     # ---- C (block before B0): the context flag ----------------------------
-    st = Stage(model, tok, fit, a.ctx_block, fit_lines, y, neg)
+    st = Stage(
+        model, tok, seqs, a.ctx_block, fit_lines, y, neg, held=held if a.trace else None
+    )
     quiet = quiet_directions(
         model, a.ctx_block + 1, st.all, st.g, 40 + sum(SIZES.values())
     )
@@ -642,7 +712,7 @@ def main() -> None:
     check("C")
 
     # ---- B0: operand flags, times the context flag ------------------------
-    st = Stage(model, tok, fit, b0, fit_lines, y, neg)
+    st = Stage(model, tok, seqs, b0, fit_lines, y, neg, held=held if a.trace else None)
     nn = Neurons()
     for name in OPERANDS:
         r, _ = st.onehot(name, 10, everywhere=False)
@@ -666,7 +736,7 @@ def main() -> None:
         return dirs[name][v]
 
     # ---- B1: digit products ----------------------------------------------
-    st = Stage(model, tok, fit, b1, fit_lines, y, neg)
+    st = Stage(model, tok, seqs, b1, fit_lines, y, neg, held=held if a.trace else None)
     fl = readouts(st, OPERANDS, log, "B1")
     nn = Neurons()
     families = [
@@ -718,7 +788,7 @@ def main() -> None:
     check("B1")
 
     # ---- B2: tens digit and the carries ----------------------------------
-    st = Stage(model, tok, fit, b2, fit_lines, y, neg)
+    st = Stage(model, tok, seqs, b2, fit_lines, y, neg, held=held if a.trace else None)
     names2 = ["P1u", "P1t", "P2u", "P2t", "U"]
     fl = readouts(st, names2, log, "B2")
     nn = Neurons()
@@ -739,7 +809,7 @@ def main() -> None:
     check("B2")
 
     # ---- B3: hundreds digit ----------------------------------------------
-    st = Stage(model, tok, fit, b3, fit_lines, y, neg)
+    st = Stage(model, tok, seqs, b3, fit_lines, y, neg, held=held if a.trace else None)
     names3 = ["k", "K", "Xu"]
     fl = readouts(st, names3, log, "B3")
     nn = Neurons()
@@ -759,7 +829,9 @@ def main() -> None:
     # ---- relay: read t and h, write them fresh into new directions -------
     names4 = ["t", "h"]
     if a.relay >= 0:
-        st = Stage(model, tok, fit, a.relay, fit_lines, y, neg)
+        st = Stage(
+            model, tok, seqs, a.relay, fit_lines, y, neg, held=held if a.trace else None
+        )
         fl = readouts(st, names4, log, "relay")
         nn = Neurons()
         for name in names4:
@@ -774,9 +846,9 @@ def main() -> None:
         names4 = ["t2", "h2"]
 
     # ---- B4: write the digits --------------------------------------------
-    st = Stage(model, tok, fit, b4, fit_lines, y, neg)
+    st = Stage(model, tok, seqs, b4, fit_lines, y, neg, held=held if a.trace else None)
     fl = readouts(st, names4, log, "B4")
-    push = digit_push(model, tok, a.margin) * final_rms(model, tok, fit[:200])
+    push = digit_push(model, tok, a.margin) * final_rms(model, tok, test[:200])
     nn = Neurons()
     pos_t, pos_h = st.pos[TENS][:, None], st.pos[HUNDREDS][:, None]
     lookup(nn, st, [(pos_t, 1), (fl[names4[0]], 10)], lambda _, d: push[d], st.const)
