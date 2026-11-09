@@ -31,6 +31,45 @@ them, is in [NOTES.md](NOTES.md).
   the model work step by step. This raises a hard set, but gives no gain on
   GSM8K.
 
+## Charts
+
+`plots.py` draws these charts from the logs in `runs/`
+(`uv run --with matplotlib python plots.py`).
+
+The carry circuit against the base model, on the same questions
+(`runs/carrymulti_w12_gen.log`):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/results-dark.png">
+  <img alt="Answers right with and without the carry circuit, on eight question sets" src="docs/img/results-light.png">
+</picture>
+
+Why a carry circuit: linear probes read the four operand digits near 100%,
+but the carry only at 30 to 61% (`runs/opprobe_mul2x2.log`):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/probe-dark.png">
+  <img alt="Probe accuracy by block for the operand digits and for the carry" src="docs/img/probe-light.png">
+</picture>
+
+Why the circuit sits at blocks 20 to 24: the operand readouts hold on new
+prompt forms only after the block 20 attention, and only with a fit on many
+prompt forms (`runs/carrygate*.log`):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/gate-dark.png">
+  <img alt="Operand readout accuracy on held-out prompt forms by block, fit on one or many forms" src="docs/img/gate-light.png">
+</picture>
+
+Why the flags have scale 32: the residual stream grows over the blocks, so
+weaker flags are lost at block 24 (`runs/carrymulti_a*.log`; this sweep fit
+4 word-problem forms, the final circuit fits 12):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/alpha-dark.png">
+  <img alt="Teacher-forced accuracy by flag scale alpha, with the base model as dotted lines" src="docs/img/alpha-light.png">
+</picture>
+
 ## Setup
 
 The code runs on Apple silicon (MLX).
@@ -65,6 +104,7 @@ The code runs on Apple silicon (MLX).
 | `carrydata.py` | Teacher-forced product sequences in many prompt forms |
 | `carrygate.py` | Do the circuit's readouts hold on held-out prompt forms |
 | `carrybuild.py` | Build the hand-written carry circuit and test it |
+| `plots.py` | Draw the README charts from the run logs |
 
 For example, build the carry circuit and score it on 1000 new products, on
 held-out prompt forms and on GSM8K:
