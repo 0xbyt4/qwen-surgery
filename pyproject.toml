@@ -3,6 +3,7 @@ name = "qwen-surgery"
 version = "0.1.0"
 description = "Edit the weights, layers and activations of a small open LLM and measure the effect"
 requires-python = ">=3.12"
+license = "MIT"
 dependencies = [
     "mlx-lm>=0.32.2",
 ]

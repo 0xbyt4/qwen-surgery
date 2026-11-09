@@ -78,3 +78,9 @@ uv run python carrybuild.py --gen 1000 --gen-seed 5 --general
 `runs/*.log` holds the printed output of the runs that NOTES.md cites. The
 JSON outputs and the agent-run folders (`runs/*.json`, `runs/*/`) are not in
 the repository: they are large and they hold local paths.
+
+## License
+
+The code is under the [MIT license](LICENSE). The data in `data/` keeps its
+own licenses (MIT, see [data/README.md](data/README.md)). The model is not in
+this repository; Qwen3-0.6B is under Apache-2.0.
