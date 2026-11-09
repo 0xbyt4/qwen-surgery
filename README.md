@@ -48,14 +48,9 @@ The code runs on Apple silicon (MLX).
    uv run hf download mlx-community/Qwen3-0.6B-bf16 --local-dir models/Qwen3-0.6B-bf16
    ```
 
-4. Get the data into `data/` (not in this repository):
-   - `data/gsm8k/test.jsonl`: the GSM8K test set from
-     [openai/grade-school-math](https://github.com/openai/grade-school-math)
-     (`grade_school_math/data/test.jsonl`).
-   - `data/stories.jsonl`: short English stories, one JSON object per line
-     with a `"text"` field. The scripts use it only as plain text, for the
-     story-loss check (`textcheck.py`) and as text where new neurons must
-     stay silent.
+4. The data is in `data/` (see [data/README.md](data/README.md) for the
+   sources and licenses): 200 SimpleStories test stories as plain text, and
+   the GSM8K test set.
 
 ## Main scripts
 

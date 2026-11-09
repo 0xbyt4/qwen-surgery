@@ -852,7 +852,7 @@ and what was done:
   `runs/wordcheck_s6.json` of section 18. Both now take `--name`. Some
   numbers have no file at all (section 15 product runs, section 17 forced
   prefixes and token counts, the logit gaps of sections 18 and 19, the
-  section 19 seed 8 and 11 data, which are in the session scratchpad only).
+  section 19 seed 8 and 11 data, which were not kept).
   Treat those as single-run results.
 - Truncation: `tradeoff.py` did not record cut replies; it does now. On
   seed 8 the base model has 14 replies cut at 768 tokens (11 of them
@@ -1312,9 +1312,6 @@ Items marked "estimate" or "idea" are not measured.
   out-of-memory error. Run large batches one at a time, or split them. Speed numbers must come from runs alone, with alternating order: in
   the first sweep the base run (first in the process) showed 190 tok/s and
   later runs 212 tok/s, which is too large a difference for one block.
-- The patches in our MLX fork (`mlx-tiny-train`) target head dim 32 and small
-  models. Qwen3-0.6B has head dim 128, which stock MLX already runs with its
-  fused attention, so the fork gives no expected gain here (not measured).
 - Idea: a 4-bit model reads about a quarter of the bytes per token, so
   generation could be much faster (estimate). Surgery on packed 4-bit weights
   is harder: a column cannot be zeroed in place without unpacking the group.

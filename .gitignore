@@ -4,4 +4,9 @@ runs/*
 __pycache__/
 .venv/
 .ruff_cache/
-data/
+data/*
+!data/README.md
+!data/stories.jsonl
+!data/gsm8k/
+data/gsm8k/*
+!data/gsm8k/test.jsonl
