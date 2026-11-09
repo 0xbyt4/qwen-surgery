@@ -37,7 +37,12 @@ them, is in [NOTES.md](NOTES.md).
 (`uv run --with matplotlib python plots.py`).
 
 The carry circuit against the base model, on the same questions
-(`runs/carrymulti_w12_gen.log`):
+(`runs/carrymulti_w12_gen.log`). First the three main sets, then all sets:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/summary-dark.png">
+  <img alt="Answers right with and without the carry circuit, on the three main sets" src="docs/img/summary-light.png">
+</picture>
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/results-dark.png">

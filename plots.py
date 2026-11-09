@@ -204,7 +204,7 @@ def save(fig, t: Theme, name: str) -> Path:
 
 
 def plot_results(t: Theme, rows: list[Paired]) -> Path:
-    fig, ax = frame(t, (10, 6.4))
+    fig, ax = frame(t, (11, 6.4))
     base, edit = t.series[0], t.series[1]
     h, gap = 0.36, 0.03
     for i, r in enumerate(rows):
@@ -220,11 +220,10 @@ def plot_results(t: Theme, rows: list[Paired]) -> Path:
                 color=t.ink2,
                 fontsize=8.5,
             )
-        word = "better" if r.edit > r.base else "worse" if r.edit < r.base else "same"
-        ax.text(110, y, f"{word}, p {r.p}", va="center", color=t.ink2, fontsize=9)
+        ax.text(110, y, f"{change(r)}, p {r.p}", va="center", color=t.ink2, fontsize=9)
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels([r.label for r in reversed(rows)], color=t.ink, fontsize=10)
-    ax.set_xlim(0, 133)
+    ax.set_xlim(0, 145)
     ax.set_xticks([0, 25, 50, 75, 100])
     ax.set_xticklabels([f"{x}%" for x in [0, 25, 50, 75, 100]])
     ax.grid(axis="x", color=t.grid, linewidth=0.8)
@@ -244,8 +243,101 @@ def plot_results(t: Theme, rows: list[Paired]) -> Path:
         ],
         0.86,
     )
-    fig.subplots_adjust(left=0.33, right=0.98, top=0.78, bottom=0.07)
+    fig.subplots_adjust(left=0.30, right=0.99, top=0.78, bottom=0.07)
     return save(fig, t, "results")
+
+
+def change(r: Paired) -> str:
+    """ "better" or "worse" at p < 0.05, else "no clear change"."""
+    if float(r.p) >= 0.05:
+        return "no clear change"
+    return "better" if r.edit > r.base else "worse"
+
+
+def plot_summary(t: Theme, rows: list[Paired]) -> Path:
+    """The three headline sets as vertical bars, sized for a post."""
+    picked = [rows[0], rows[1], rows[4]]
+    names = [
+        "Prompt forms used in the fit",
+        "Phrasings never used in the fit",
+        "Word problems never used in the fit",
+    ]
+    fig, ax = frame(t, (12, 6.75))
+    base, edit = t.series[0], t.series[1]
+    w, gap = 0.34, 0.02
+    for i, (r, name) in enumerate(zip(picked, names, strict=True)):
+        for j, (v, c) in enumerate([(r.base, base), (r.edit, edit)]):
+            x = i + (j - 0.5) * (w + gap)
+            pct = v / r.n * 100
+            ax.bar(x, pct, width=w, color=c)
+            ax.text(
+                x,
+                pct + 1.5,
+                f"{pct:.0f}%",
+                ha="center",
+                va="bottom",
+                color=t.ink,
+                fontsize=15,
+                fontweight="bold",
+            )
+            ax.text(
+                x,
+                pct + 7.5,
+                f"{v}/{r.n}",
+                ha="center",
+                va="bottom",
+                color=t.ink2,
+                fontsize=11,
+            )
+        ax.text(i, -6, name, ha="center", va="top", color=t.ink, fontsize=13)
+        ax.text(
+            i,
+            -12,
+            f"{change(r)}, p = {r.p}",
+            ha="center",
+            va="top",
+            color=t.ink2,
+            fontsize=11,
+        )
+    ax.set_xlim(-0.6, 2.6)
+    ax.set_ylim(0, 112)
+    ax.set_xticks([])
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.set_yticklabels([f"{x}%" for x in [0, 25, 50, 75, 100]], fontsize=11)
+    ax.grid(axis="y", color=t.grid, linewidth=0.8)
+    fig.text(
+        0.06,
+        0.95,
+        "Hand-written carry neurons in Qwen3-0.6B, no training",
+        color=t.ink,
+        fontsize=19,
+        fontweight="bold",
+        va="top",
+    )
+    fig.text(
+        0.06,
+        0.885,
+        "2-digit x 2-digit products answered right (greedy, "
+        "same questions with and without the neurons)",
+        color=t.ink2,
+        fontsize=12,
+        va="top",
+    )
+    leg = fig.legend(
+        handles=[
+            Patch(color=base, label="Base model"),
+            Patch(color=edit, label="With ~4,200 written neurons"),
+        ],
+        loc="upper left",
+        bbox_to_anchor=(0.055, 0.85),
+        frameon=False,
+        fontsize=12,
+        ncol=2,
+    )
+    for x in leg.get_texts():
+        x.set_color(t.ink)
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.74, bottom=0.18)
+    return save(fig, t, "summary")
 
 
 def plot_probe(t: Theme, data) -> Path:
@@ -401,6 +493,7 @@ def main() -> None:
     data = results(), probe(), gate(), alpha()
     for t in THEMES:
         for path in [
+            plot_summary(t, data[0]),
             plot_results(t, data[0]),
             plot_probe(t, data[1]),
             plot_gate(t, data[2]),
