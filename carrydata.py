@@ -12,7 +12,7 @@ problems of carrybuild --general) only for tests.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import mlx.core as mx
 import numpy as np
@@ -65,7 +65,13 @@ HELD_WORD = [
     "Tom reads {a} pages a day for {b} days. How many pages does he read?",
     "Each ticket costs {a} dollars. How much do {b} tickets cost?",
 ]
+FIT_PLAIN = ["What's {a} × {b}?", "Can you work out {a} * {b}?"]
+# a number may carry a unit: "67 \\, \\text{pages/day} \\times 36 \\text{ days} = "
+UNIT = r"(?:\s*\\,)?(?:\s*\\text\{[^}]*\})?"
 LINE = re.compile(r"(\d+)\s*(?:×|\\times|\*|x|\\cdot|·)\s*(\d+)\s*=\s*")
+LINE_UNITS = re.compile(
+    rf"(?<![\d.,])(\d+){UNIT}\s*(?:×|\\times|\*|x|\\cdot|·)\s*(\d+){UNIT}\s*=\s*"
+)
 
 
 @dataclass
@@ -75,6 +81,9 @@ class Seqs:
     pairs: np.ndarray  # [N, 2], operands in the order of the reply line
     template: np.ndarray  # template index per sequence
     asked: np.ndarray  # [N, 2], the pair as asked
+    # full base replies (ids, positions to use as negatives): every position
+    # except the ones that predict the product digits after a product line
+    neg: list[tuple[list[int], list[int], list[int]]] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -99,9 +108,12 @@ def collect(
     max_tokens: int,
     batch: int,
     log: dict | None = None,
+    units: bool = False,
 ) -> Seqs:
-    """Sequences for pairs, template i % len(templates) for pair i."""
-    ids, first, line, tmpl, asked = [], [], [], [], []
+    """Sequences for pairs, template i % len(templates) for pair i. With
+    units, product lines may carry units (LINE_UNITS)."""
+    pattern = LINE_UNITS if units else LINE
+    ids, first, line, tmpl, asked, negs = [], [], [], [], [], []
     miss = [0] * len(templates)
     for s in range(0, len(pairs), batch):
         part = [tuple(map(int, p)) for p in pairs[s : s + batch]]
@@ -119,10 +131,11 @@ def collect(
         )
         for i, ((a, b), p, text) in enumerate(zip(part, prompts, r.texts, strict=True)):
             t = (s + i) % len(templates)
+            negs.append(negative_positions(tok, p, text))
             m = next(
                 (
                     m
-                    for m in LINE.finditer(text)
+                    for m in pattern.finditer(text)
                     if sorted((int(m[1]), int(m[2]))) == sorted((a, b))
                 ),
                 None,
@@ -144,7 +157,45 @@ def collect(
         log.setdefault("missing", []).append(
             {"templates": templates, "mode": mode, "missing": miss}
         )
-    return Seqs(ids, np.array(first), np.array(line), np.array(tmpl), np.array(asked))
+    return Seqs(
+        ids, np.array(first), np.array(line), np.array(tmpl), np.array(asked), negs
+    )
+
+
+def negative_positions(tok, prompt: list[int], text: str):
+    """Prompt + reply ids, and two lists of positions to use as negatives:
+    all positions except a window around the digits after each product line
+    of two two-digit numbers; and all positions except a window around every
+    number of three or more digits (a restated product looks the same to the
+    model as the product line). A cut prefix can tokenize differently at its
+    end, so the windows are wider than the digits."""
+    ids = prompt + tok.encode(text, add_special_tokens=False)
+
+    def at(char: int) -> int:
+        return len(prompt) + len(tok.encode(text[:char], add_special_tokens=False))
+
+    lines: set[int] = set()
+    for m in LINE_UNITS.finditer(text):
+        if len(m[1]) == 2 and len(m[2]) == 2:
+            lines.update(range(at(m.end()) - 2, at(m.end()) + WIDTH + 2))
+    numbers = set(lines)
+    for m in re.finditer(r"\d[\d,]{2,}", text):
+        numbers.update(range(at(m.start()) - 2, at(m.end()) + 2))
+    keep = [[j for j in range(len(ids)) if j not in drop] for drop in (lines, numbers)]
+    return ids, keep[0], keep[1]
+
+
+def neg_states(model, negs, block: int, which: int = 1) -> np.ndarray:
+    """[M, d] at the kept positions of full base replies (which: 1 keeps all
+    but the product digits, 2 all but every number of three or more digits)."""
+    q = Seqs(
+        [n[0] for n in negs],
+        np.zeros(len(negs), dtype=int),
+        np.zeros((len(negs), 2), dtype=int),
+        np.zeros(len(negs), dtype=int),
+        np.zeros((len(negs), 2), dtype=int),
+    )
+    return np.concatenate(states(model, q, block, lambda i, _: negs[i][which]))
 
 
 def states(
@@ -197,6 +248,7 @@ def concat(parts: list[Seqs], offsets: list[int]) -> Seqs:
         np.concatenate([q.pairs for q in parts]),
         np.concatenate([q.template + o for q, o in zip(parts, offsets, strict=True)]),
         np.concatenate([q.asked for q in parts]),
+        [n for q in parts for n in q.neg],
     )
 
 

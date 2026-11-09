@@ -1178,10 +1178,34 @@ word problems of `--general`.
   readout was never fit on it, so the circuit writes wrong digits ("368",
   "243"). The one held template with this form ("Tom reads ...") gave no
   teacher-forced sequences, so the trace did not see it.
-- Open: the circuit must stay silent where it cannot read the operands
-  (fit such forms as negatives of the context, or fit them as positives
-  with the right operands, or gate the write on exactly one operand flag
-  per digit); the plain-prompt loss; chat drift.
+- Three tries to close the word-problem gap, all worse than the run above
+  (`runs/carrymulti_neg.log`, `runs/carrymulti_fn_none.log`,
+  `runs/carrymulti_fn_numbers.log`; each with a parser for product lines
+  with units, `--units`, and 800 plain-prompt fit products, `--n-plain`):
+
+  | run | context gap, block 19 | fit template, teacher forced | held phrasings, gen | held word, gen | plain "What is A * B?" | fit template, gen |
+  |---|---|---|---|---|---|---|
+  | above (no units, no plain fit) | -0.20 | 0.931 | 269 to 294 | 284 to 210 | 336 to 309 | 642 to 907 |
+  | full replies as negatives | -0.71 | 0.747 | 269 to 219 | 290 to 247 | 335 to 320 | 651 to 734 |
+  | no full-reply negatives | -0.52 | 0.780 | 269 to 249 | 290 to 227 | 335 to 262 | 651 to 770 |
+  | full replies, all numbers of 3+ digits left out | -0.53 | 0.801 | 269 to 235 | 290 to 243 | 335 to 265 | 651 to 785 |
+
+  - Full base replies as context negatives make the context readout fail:
+    a restated product ("**Answer: 1660**", "= 8460 - 188 = 8272") looks to
+    the model like the product line, and a linear readout cannot put one
+    at 1 and the other at 0.
+  - Even without them, the plain-prompt fit products and the lines with
+    units make the context harder (gap -0.52) and every result worse. The
+    word-problem gain from the new line forms is small (210 to 227..247)
+    against the losses elsewhere.
+  - The defaults of `carrybuild.py` are again the configuration of the
+    best run (`--units` off, `--n-plain 0`, `--full-neg none`); this exact
+    code was not run again after the change.
+- Open: a context signal that is not linear in one block (for example the
+  AND of the context readout with "a product line is in the last few
+  tokens", from an attention head the circuit reads), so that the circuit
+  stays silent where it cannot read the operands; the plain-prompt loss;
+  chat drift.
 
 ## Observations
 

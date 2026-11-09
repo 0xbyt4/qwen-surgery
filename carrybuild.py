@@ -231,10 +231,17 @@ class Stage:
         neg,
         n_other=400,
         held: dict | None = None,
+        n_full=250,
+        full_neg: str = "none",
     ) -> None:
         n = cd.answer_states(model, seqs, block)
         spread = np.linspace(0, len(seqs) - 1, n_other).astype(int)
         other = cd.other_states(model, seqs.subset(spread), block)
+        if seqs.neg and full_neg != "none":
+            pick = np.linspace(0, len(seqs.neg) - 1, n_full).astype(int)
+            which = 1 if full_neg == "lines" else 2
+            full = cd.neg_states(model, [seqs.neg[i] for i in pick], block, which)
+            other = np.concatenate([other, full])
         st = np.concatenate(
             [
                 story_inputs(model, tok, block, story_lines),
@@ -553,6 +560,14 @@ def main() -> None:
     p.add_argument("--margin", type=float, default=15.0)
     p.add_argument("--n-fit", type=int, default=2400, help="direct fit pairs")
     p.add_argument("--n-word", type=int, default=2400, help="word fit pairs")
+    p.add_argument("--n-plain", type=int, default=0, help="plain fit pairs")
+    p.add_argument("--units", action="store_true", help="lines with units")
+    p.add_argument(
+        "--full-neg",
+        default="none",
+        choices=["none", "lines", "numbers"],
+        help="full base replies as context negatives (carrydata.negative_positions)",
+    )
     p.add_argument("--n-held", type=int, default=400)
     p.add_argument("--one-template", action="store_true", help="old fit set")
     p.add_argument("--trace", action="store_true", help="readouts on held templates")
@@ -572,7 +587,7 @@ def main() -> None:
     b0, b1, b2, b3, b4 = (int(x) for x in a.blocks.split(","))
     model, tok = load(a.model)
     s = Surgeon(model)
-    fit = np.array(mul2x2(a.n_fit + a.n_word, 2))
+    fit = np.array(mul2x2(a.n_fit + a.n_word + a.n_plain, 2))
     test = np.array(mul2x2(a.n_test, 3, exclude={tuple(x) for x in fit}))
     held_pairs = mul2x2(2 * a.n_held, 21, exclude={tuple(x) for x in fit})
     data_log: dict = {}
@@ -581,24 +596,46 @@ def main() -> None:
             model, tok, fit[: a.n_fit], cd.FIT_DIRECT[:1], "direct", 64, 100, data_log
         )
     else:
-        seqs = cd.concat(
-            [
+        groups = [
+            cd.collect(
+                model,
+                tok,
+                fit[: a.n_fit],
+                cd.FIT_DIRECT,
+                "direct",
+                64,
+                100,
+                data_log,
+                units=a.units,
+            ),
+            cd.collect(
+                model,
+                tok,
+                fit[a.n_fit : a.n_fit + a.n_word],
+                cd.FIT_WORD,
+                "plain",
+                200,
+                50,
+                data_log,
+                units=a.units,
+            ),
+        ]
+        if a.n_plain:
+            groups.append(
                 cd.collect(
                     model,
                     tok,
-                    fit[: a.n_fit],
-                    cd.FIT_DIRECT,
-                    "direct",
-                    64,
-                    100,
+                    fit[a.n_fit + a.n_word :],
+                    cd.FIT_PLAIN,
+                    "plain",
+                    320,
+                    50,
                     data_log,
-                ),
-                cd.collect(
-                    model, tok, fit[a.n_fit :], cd.FIT_WORD, "plain", 200, 50, data_log
-                ),
-            ],
-            [0, len(cd.FIT_DIRECT)],
-        )
+                    units=a.units,
+                )
+            )
+        offsets = [0, len(cd.FIT_DIRECT), len(cd.FIT_DIRECT) + len(cd.FIT_WORD)]
+        seqs = cd.concat(groups, offsets[: len(groups)])
     held = {
         "direct": cd.collect(
             model,
@@ -609,6 +646,7 @@ def main() -> None:
             64,
             100,
             data_log,
+            units=a.units,
         ),
         "word": cd.collect(
             model,
@@ -619,6 +657,7 @@ def main() -> None:
             200,
             50,
             data_log,
+            units=a.units,
         ),
     }
     print(
@@ -688,7 +727,15 @@ def main() -> None:
 
     # ---- C (block before B0): the context flag ----------------------------
     st = Stage(
-        model, tok, seqs, a.ctx_block, fit_lines, y, neg, held=held if a.trace else None
+        model,
+        tok,
+        seqs,
+        a.ctx_block,
+        fit_lines,
+        y,
+        neg,
+        held=held if a.trace else None,
+        full_neg=a.full_neg,
     )
     quiet = quiet_directions(
         model, a.ctx_block + 1, st.all, st.g, 40 + sum(SIZES.values())
@@ -712,7 +759,17 @@ def main() -> None:
     check("C")
 
     # ---- B0: operand flags, times the context flag ------------------------
-    st = Stage(model, tok, seqs, b0, fit_lines, y, neg, held=held if a.trace else None)
+    st = Stage(
+        model,
+        tok,
+        seqs,
+        b0,
+        fit_lines,
+        y,
+        neg,
+        held=held if a.trace else None,
+        full_neg=a.full_neg,
+    )
     nn = Neurons()
     for name in OPERANDS:
         r, _ = st.onehot(name, 10, everywhere=False)
@@ -736,7 +793,17 @@ def main() -> None:
         return dirs[name][v]
 
     # ---- B1: digit products ----------------------------------------------
-    st = Stage(model, tok, seqs, b1, fit_lines, y, neg, held=held if a.trace else None)
+    st = Stage(
+        model,
+        tok,
+        seqs,
+        b1,
+        fit_lines,
+        y,
+        neg,
+        held=held if a.trace else None,
+        full_neg=a.full_neg,
+    )
     fl = readouts(st, OPERANDS, log, "B1")
     nn = Neurons()
     families = [
@@ -788,7 +855,17 @@ def main() -> None:
     check("B1")
 
     # ---- B2: tens digit and the carries ----------------------------------
-    st = Stage(model, tok, seqs, b2, fit_lines, y, neg, held=held if a.trace else None)
+    st = Stage(
+        model,
+        tok,
+        seqs,
+        b2,
+        fit_lines,
+        y,
+        neg,
+        held=held if a.trace else None,
+        full_neg=a.full_neg,
+    )
     names2 = ["P1u", "P1t", "P2u", "P2t", "U"]
     fl = readouts(st, names2, log, "B2")
     nn = Neurons()
@@ -809,7 +886,17 @@ def main() -> None:
     check("B2")
 
     # ---- B3: hundreds digit ----------------------------------------------
-    st = Stage(model, tok, seqs, b3, fit_lines, y, neg, held=held if a.trace else None)
+    st = Stage(
+        model,
+        tok,
+        seqs,
+        b3,
+        fit_lines,
+        y,
+        neg,
+        held=held if a.trace else None,
+        full_neg=a.full_neg,
+    )
     names3 = ["k", "K", "Xu"]
     fl = readouts(st, names3, log, "B3")
     nn = Neurons()
@@ -830,7 +917,15 @@ def main() -> None:
     names4 = ["t", "h"]
     if a.relay >= 0:
         st = Stage(
-            model, tok, seqs, a.relay, fit_lines, y, neg, held=held if a.trace else None
+            model,
+            tok,
+            seqs,
+            a.relay,
+            fit_lines,
+            y,
+            neg,
+            held=held if a.trace else None,
+            full_neg=a.full_neg,
         )
         fl = readouts(st, names4, log, "relay")
         nn = Neurons()
@@ -846,7 +941,17 @@ def main() -> None:
         names4 = ["t2", "h2"]
 
     # ---- B4: write the digits --------------------------------------------
-    st = Stage(model, tok, seqs, b4, fit_lines, y, neg, held=held if a.trace else None)
+    st = Stage(
+        model,
+        tok,
+        seqs,
+        b4,
+        fit_lines,
+        y,
+        neg,
+        held=held if a.trace else None,
+        full_neg=a.full_neg,
+    )
     fl = readouts(st, names4, log, "B4")
     push = digit_push(model, tok, a.margin) * final_rms(model, tok, test[:200])
     nn = Neurons()
