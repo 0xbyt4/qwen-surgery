@@ -1037,7 +1037,7 @@ turned back to our own neuron surgery. What they measured:
   becomes the top token at 0.98 to 1.00 of the target states and at none of
   the X + Y states. It was not run in generation.
 
-## 27. Hand-written neurons compute the carry of two-digit products (`opprobe.py`, `carrycollect.py`, `carrybuild.py`, `runs/opprobe_mul2x2.log`, `runs/carrybuild13gen.log`, `runs/carryverify*.log`)
+## 27. Hand-written neurons compute the carry of two-digit products (`opprobe.py`, `carrycollect.py`, `carrybuild.py`, `runs/opprobe_mul2x2.log`, `runs/carrybuild13gen.log`, `runs/carryverify*.log`, `runs/carrygeneral.log`)
 
 No training. New MLP neurons, with weights written from fixed arithmetic,
 compute the hundreds and tens digit of A * B and write them into the logits.
@@ -1099,8 +1099,29 @@ compute the hundreds and tens digit of A * B and write them into the logits.
     also die in the context (the context readout is about 0.93 there, and M
     is large): teacher forced 0.506, generation 652 to 496
     (`runs/carryverify6_s5.log`). Kept the version above.
-- Open: the remaining chat drift (1.5 points of top-1 agreement), a GSM8K
-  check with the circuit, generation in plain mode, the thousands digit.
+- Generalization (`--general`, `runs/carrygeneral.log`, paired, 400 each,
+  products not in the fit, test or seed-5 sets): the circuit does not
+  generalize past the prompt it was fit on.
+  - Other phrasings, direct prompt ("Calculate A × B.", "A times B = ?",
+    "Multiply A by B.", "What is the product of A and B?"): 268 to 31
+    right (+4 / -241, p = 5e-66). The reply has the same "A × B = " form as
+    in the fit prompt, but 269 of the 369 wrong replies break the number
+    (spaces inside it, "8 800", "1 9 4 8"); most of the others have a wrong
+    hundreds or tens digit. All four phrasings fail the same way.
+  - Word problems, plain prompt: 286 to 170 (+23 / -139, p = 2e-21); the
+    LaTeX line "21 \times 63 = " gets wrong digits ("13 [dollars]",
+    "14,600").
+  - "What is A * B?" with the plain prompt: 338 to 325 (+12 / -25,
+    p = 0.047); these replies are long and use other methods.
+  - GSM8K, first 400, plain: 229 to 236 (+21 / -14, p = 0.31), no change.
+  - Reading: the context, position and operand readouts are fit on one
+    prompt template; a different prompt above the same reply text moves the
+    states enough that the flags fire wrong or at wrong positions. The gain
+    on the fit template is real, but the readouts learned the template, not
+    "a product is being written".
+- Open: fit the readouts on many prompt templates and reply styles (the
+  base model's own right replies, teacher forced), then test on held-out
+  templates; the remaining chat drift; the thousands digit.
 
 ## Observations
 

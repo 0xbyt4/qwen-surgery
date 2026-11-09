@@ -57,6 +57,7 @@ from mlx_lm import batch_generate, load
 from carrycollect import mlp_inputs
 from circuit import run_blocks
 from evalmath import DEFAULT_MODEL, ROOT, prompt_ids, run
+from gsm8k import gsm8k
 from mathgen import hard_questions
 from mixedcheck import sub_big, three
 from mulfix import score
@@ -487,6 +488,58 @@ def side_sets(model, tok) -> dict[str, list]:
     return out
 
 
+PHRASINGS = [
+    "Calculate {a} × {b}.",
+    "{a} times {b} = ?",
+    "Multiply {a} by {b}.",
+    "What is the product of {a} and {b}?",
+]
+WORD = [
+    "A box holds {a} pencils. How many pencils are in {b} boxes?",
+    "A theater has {a} rows with {b} seats in each row. How many seats are "
+    "there in all?",
+    "Tom reads {a} pages a day for {b} days. How many pages does he read?",
+    "Each ticket costs {a} dollars. How much do {b} tickets cost?",
+]
+
+
+def general_sets(seen: set) -> dict[str, tuple[list, str, int, int]]:
+    """Tasks the circuit was not built for, as (qa, mode, max tokens, batch):
+    new products with the plain prompt, other phrasings (direct prompt),
+    word problems (plain prompt), and GSM8K (plain prompt, first 400)."""
+
+    def pairs(n: int, seed: int) -> list[tuple[int, int]]:
+        out = mul2x2(n, seed, exclude=seen)
+        seen.update(out)
+        return out
+
+    def fill(forms: list[str], ps) -> list[tuple[str, int]]:
+        return [
+            (forms[i % len(forms)].format(a=x, b=z), x * z)
+            for i, (x, z) in enumerate(ps)
+        ]
+
+    return {
+        "plain": (
+            [(f"What is {x} * {z}?", x * z) for x, z in pairs(400, 6)],
+            "plain",
+            384,
+            50,
+        ),
+        "phrasings": (fill(PHRASINGS, pairs(400, 7)), "direct", 64, 100),
+        "word": (fill(WORD, pairs(400, 9)), "plain", 384, 50),
+        "gsm8k": (gsm8k(400), "plain", 768, 25),
+    }
+
+
+def run_set(model, tok, spec) -> list:
+    qa, mode, max_tokens, batch = spec
+    out = []
+    for i in range(0, len(qa), batch):
+        out += run(model, tok, mode, max_tokens, qa[i : i + batch])
+    return out
+
+
 def sign_p(gained: int, lost: int) -> float:
     """Two-sided sign test (exact McNemar) on the discordant pairs."""
     n, k = gained + lost, min(gained, lost)
@@ -508,6 +561,9 @@ def main() -> None:
     p.add_argument("--gen", type=int, default=0, help="new products to generate")
     p.add_argument("--gen-seed", type=int, default=4)
     p.add_argument("--side", action="store_true", help="score other tasks too")
+    p.add_argument(
+        "--general", action="store_true", help="score other forms of the task"
+    )
     p.add_argument("--relay", type=int, default=21, help="relay block; -1: none")
     p.add_argument("--ctx-block", type=int, default=15)
     a = p.parse_args()
@@ -747,7 +803,43 @@ def main() -> None:
         edit_items = generate(model, tok, qa)
     if a.side:
         edit_side = side_sets(model, tok)
+    if a.general:
+        seen = {tuple(x) for x in fit} | {tuple(x) for x in test}
+        tasks = general_sets(seen)
+        edit_general = {}
+        for name, spec in tasks.items():
+            edit_general[name] = run_set(model, tok, spec)
+            right = sum(i.correct for i in edit_general[name])
+            print(f"general {name} (edit): {right} of {len(spec[0])}", flush=True)
     s.restore()
+    if a.general:
+        log["general"] = {}
+        for name, spec in tasks.items():
+            b_items, e_items = run_set(model, tok, spec), edit_general[name]
+            r0 = [int(i.correct) for i in b_items]
+            r1 = [int(i.correct) for i in e_items]
+            g = sum(b == 0 and e == 1 for b, e in zip(r0, r1, strict=True))
+            lo = sum(b == 1 and e == 0 for b, e in zip(r0, r1, strict=True))
+            log["general"][name] = {
+                "mode": spec[1],
+                "base": sum(r0),
+                "edit": sum(r1),
+                "gained": g,
+                "lost": lo,
+                "p": sign_p(g, lo),
+                "of": len(r0),
+                "questions": [q for q, _ in spec[0]],
+                "answers": [x for _, x in spec[0]],
+                "base_outputs": [i.output for i in b_items],
+                "edit_outputs": [i.output for i in e_items],
+                "base_right": r0,
+                "edit_right": r1,
+            }
+            print(
+                f"general {name} ({spec[1]}): base {sum(r0)} edit {sum(r1)} of "
+                f"{len(r0)} (+{g} / -{lo}, p {sign_p(g, lo):.2g})",
+                flush=True,
+            )
     nll0 = text_nll(model, tok, texts)
     if a.side:
         base_side = side_sets(model, tok)
